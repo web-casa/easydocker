@@ -1,7 +1,325 @@
 #!/bin/bash
-# EasyDocker — Docker 一键安装配置脚本
-# 支持官方未覆盖的 Linux 发行版（openEuler、Kylin、Anolis、OpenCloudOS 等）
+# EasyDocker — One-click Docker installation script
+# Supports Linux distros not covered by the official Docker install script
+# (openEuler, Kylin, Anolis, OpenCloudOS, etc.)
 set -e
+
+# ============================================================
+# i18n message system
+# ============================================================
+declare -A MESSAGES
+
+init_messages_en() {
+  MESSAGES=(
+    [welcome]="Welcome to EasyDocker — Docker One-Click Installer"
+    [official_site]="Official site: https://docs.docker.com"
+    [fetching_versions]="Fetching latest version numbers..."
+    [version_info]="  Docker: %s  |  Compose: %s"
+    [try_download]="  Trying: %s"
+    [download_ok]="  Download succeeded"
+    [download_all_failed]="  All download sources failed"
+    [configuring_repo]="Configuring Docker CE repository (%s)..."
+    [try_source]="  Trying source: %s"
+    [source_ok]="  Source configured: %s"
+    [source_all_failed]="All Docker sources failed"
+    [configuring_apt]="Configuring Docker CE APT repository (%s)..."
+    [apt_source_ok]="  APT source configured: %s"
+    [apt_source_all_failed]="All Docker APT sources failed"
+    [installing_docker]="Installing Docker CE..."
+    [docker_installed]="Docker CE installed successfully"
+    [batch_install_failed]="Batch install failed, trying individual packages..."
+    [installing_pkg]="  Installing %s..."
+    [pkg_installed]="  %s installed"
+    [pkg_failed]="  %s install failed"
+    [core_installed]="Docker CE core components installed"
+    [pkg_fallback_binary]="Package manager install failed, falling back to binary install..."
+    [apt_fallback_binary]="APT install failed, falling back to binary install..."
+    [downloading_binary]="Downloading Docker %s binary package..."
+    [binary_all_failed]="All download sources failed, cannot install Docker"
+    [check_network]="Please check your network or install Docker manually"
+    [extracting]="Extracting and installing..."
+    [selinux_warning]="SELinux is enabled (%s). Binary install may have SELinux context issues."
+    [selinux_tip]="Tip: Install container-selinux >= 2.74 or run setenforce 0"
+    [binary_installed]="Docker binary installed successfully"
+    [isulad_detected]="iSulad detected, removing to avoid conflict with Docker CE"
+    [installing_compose]="Installing Docker Compose..."
+    [compose_already]="Docker Compose (plugin) already installed: %s"
+    [downloading_compose]="Downloading Docker Compose v%s..."
+    [compose_installed]="Docker Compose v%s installed"
+    [compose_failed]="Docker Compose binary download failed"
+    [compose_tip]="You can still use 'docker compose' (if plugin is installed) or install manually"
+    [starting_docker]="Starting Docker service..."
+    [service_missing]="docker.service not found, cannot start Docker"
+    [autostart_ok]="Docker set to start on boot"
+    [autostart_failed]="Failed to set autostart"
+    [service_started]="Docker service started"
+    [service_start_failed]="Docker service failed to start, checking logs..."
+    [service_start_tip]="Tip: Try starting manually with: sudo dockerd &"
+    [configuring_mirror]="Configuring mirror acceleration..."
+    [backup_ok]="Existing config backed up"
+    [no_dns_added]="No DNS configured, added Docker DNS automatically"
+    [dns_exists]="System DNS found, skipping Docker DNS"
+    [daemon_json_ok]="daemon.json configured"
+    [current_mirrors]="Configured mirrors:"
+    [mirror_priority]="  - https://%s (priority)"
+    [mirror_fallback]="  - https://%s (fallback)"
+    [select_mirror]="Select mirror acceleration:"
+    [mirror_opt_none]="1) No mirror acceleration (default)"
+    [mirror_opt_public]="2) Use public mirror (docker.m.daocloud.io)"
+    [mirror_opt_custom]="3) Use custom mirror domain"
+    [enter_choice]="Enter choice [%s]: "
+    [invalid_choice]="Invalid choice"
+    [enter_custom_domain]="Enter your custom mirror domain: "
+    [reloading_docker]="Reloading Docker configuration..."
+    [waiting_docker]="Waiting for Docker service..."
+    [service_restarted]="Docker service restarted successfully"
+    [service_restart_failed]="Docker service restart failed, please check config"
+    [configuring_user]="Configuring user permissions..."
+    [group_warning]="Adding user %s to docker group grants root-level privileges."
+    [group_confirm]="Add %s to docker group? [Y/n] "
+    [group_added]="User %s added to docker group"
+    [group_relogin]="Please re-login or run 'newgrp docker' to apply"
+    [group_skipped]="Skipped user group configuration"
+    [group_already]="User %s is already in docker group"
+    [group_root]="Running as root, no need to add to docker group"
+    [no_sudo]="sudo not found, running commands directly as root"
+    [select_mode]="Select operation mode:"
+    [mode_install]="1) Install and configure (recommended)"
+    [mode_mirror]="2) Change mirror acceleration only"
+    [mode_install_label]="Mode: Install and configure"
+    [mode_mirror_label]="Mode: Change mirror acceleration"
+    [docker_exists]="Docker %s is already installed"
+    [docker_exists_warn]="Continuing will upgrade or reinstall Docker. Back up important data first."
+    [confirm_continue]="1) Continue with install/upgrade"
+    [confirm_back]="2) Go back"
+    [user_confirmed]="User confirmed, continuing"
+    [going_back]="Going back..."
+    [docker_not_installed]="Docker is not installed! Use option 1 for full installation"
+    [mirror_config_done]="Mirror configuration complete!"
+    [service_restart_ok]="Docker restarted, new config applied"
+    [service_restart_err]="Docker restart failed"
+    [service_not_running]="Docker is not running, config will apply on next start"
+    [checking_system]="Checking system information..."
+    [system_info]="System: %s %s  Arch: %s"
+    [docker_arch]="Docker arch: %s"
+    [configuring_source]="Configuring Docker source..."
+    [install_done]="Installation and configuration complete!"
+    [docker_version_info]="Docker version: %s"
+    [detected_os]="Detected %s %s, using %s repository"
+    [unsupported_os]="Unsupported: %s %s"
+    [unsupported_version]="Unsupported: %s %s (only %s supported)"
+    [supported_list]="Supported: CentOS/RHEL/Rocky/AlmaLinux 8-10, openEuler 20+, OpenCloudOS, Anolis 8+, Alinux, Kylin, Fedora, Ubuntu, Debian, Kali"
+    [cannot_detect_codename]="Cannot detect codename for %s %s"
+    [macos_detected]="macOS detected"
+    [macos_unsupported]="macOS is not supported by this Linux install script"
+    [macos_install_methods]="How to install Docker on macOS:"
+    [macos_homebrew]="Method 1: Install with Homebrew (recommended)"
+    [macos_download]="Method 2: Download official installer"
+    [macos_mirror_config]="Configure Docker mirror acceleration"
+    [windows_detected]="Windows detected"
+    [windows_unsupported]="Windows is not supported by this Linux install script"
+    [windows_install_methods]="How to install Docker on Windows:"
+    [windows_desktop]="Method 1: Docker Desktop (recommended)"
+    [windows_wsl]="Method 2: Use WSL 2"
+    [mirror_required]="--mirror must be set to 'public' or a domain when using --mode mirror"
+    [usage_header]="Usage: bash docker.sh [OPTIONS]"
+    [usage_options]="Options:"
+  )
+}
+
+init_messages_zh() {
+  MESSAGES=(
+    [welcome]="欢迎使用 EasyDocker — Docker 一键安装配置脚本"
+    [official_site]="官方网站: https://docs.docker.com"
+    [fetching_versions]="正在获取最新版本号..."
+    [version_info]="  Docker: %s  |  Compose: %s"
+    [try_download]="  尝试下载: %s"
+    [download_ok]="  下载成功"
+    [download_all_failed]="  所有源下载失败"
+    [configuring_repo]="正在配置 Docker CE 仓库 (%s)..."
+    [try_source]="  尝试源: %s"
+    [source_ok]="  源配置成功: %s"
+    [source_all_failed]="所有 Docker 源都配置失败"
+    [configuring_apt]="正在配置 Docker CE APT 仓库 (%s)..."
+    [apt_source_ok]="  APT 源配置成功: %s"
+    [apt_source_all_failed]="所有 Docker APT 源都配置失败"
+    [installing_docker]="安装 Docker CE..."
+    [docker_installed]="Docker CE 安装成功"
+    [batch_install_failed]="批量安装失败，尝试逐个安装..."
+    [installing_pkg]="  安装 %s..."
+    [pkg_installed]="  %s 安装成功"
+    [pkg_failed]="  %s 安装失败"
+    [core_installed]="Docker CE 核心组件安装完成"
+    [pkg_fallback_binary]="包管理器安装失败，回退到二进制安装..."
+    [apt_fallback_binary]="APT 安装失败，回退到二进制安装..."
+    [downloading_binary]="正在下载 Docker %s 二进制包..."
+    [binary_all_failed]="所有下载源都失败，无法安装 Docker"
+    [check_network]="请检查网络连接或手动安装 Docker"
+    [extracting]="正在解压并安装..."
+    [selinux_warning]="检测到 SELinux 处于开启状态 (%s)，二进制安装可能会遇到上下文问题"
+    [selinux_tip]="推荐：安装 container-selinux >= 2.74 或临时执行 setenforce 0"
+    [binary_installed]="Docker 二进制安装成功"
+    [isulad_detected]="检测到 iSulad，需要卸载以避免与 Docker CE 冲突"
+    [installing_compose]="安装 Docker Compose..."
+    [compose_already]="Docker Compose (插件版) 已安装: %s"
+    [downloading_compose]="正在下载 Docker Compose v%s..."
+    [compose_installed]="Docker Compose v%s 安装完成"
+    [compose_failed]="Docker Compose 独立二进制下载失败"
+    [compose_tip]="您仍可以使用 'docker compose'（如果插件已安装）或手动安装"
+    [starting_docker]="启动 Docker 服务..."
+    [service_missing]="docker.service 文件不存在，Docker 服务无法启动"
+    [autostart_ok]="Docker 已设为开机自启"
+    [autostart_failed]="开机自启设置失败"
+    [service_started]="Docker 服务启动成功"
+    [service_start_failed]="Docker 服务启动失败，尝试查看日志..."
+    [service_start_tip]="可尝试手动启动: sudo dockerd &"
+    [configuring_mirror]="配置镜像加速..."
+    [backup_ok]="已备份现有配置"
+    [no_dns_added]="系统未配置 DNS，已自动添加 Docker DNS"
+    [dns_exists]="系统已有 DNS 配置，跳过 Docker DNS 设置"
+    [daemon_json_ok]="daemon.json 配置完成"
+    [current_mirrors]="当前配置的镜像源:"
+    [mirror_priority]="  - https://%s (优先)"
+    [mirror_fallback]="  - https://%s (备用)"
+    [select_mirror]="请选择镜像加速版本:"
+    [mirror_opt_none]="1) 不使用镜像加速（默认）"
+    [mirror_opt_public]="2) 使用公共加速域名 (docker.m.daocloud.io)"
+    [mirror_opt_custom]="3) 使用自定义加速域名"
+    [enter_choice]="请输入选择 [%s]: "
+    [invalid_choice]="无效选择"
+    [enter_custom_domain]="请输入您的自定义镜像加速域名: "
+    [reloading_docker]="重载 Docker 配置..."
+    [waiting_docker]="等待 Docker 服务启动..."
+    [service_restarted]="Docker 服务已成功启动"
+    [service_restart_failed]="Docker 服务启动失败，请检查配置"
+    [configuring_user]="配置用户权限..."
+    [group_warning]="将用户 %s 加入 docker 组意味着赋予该用户 root 级权限。"
+    [group_confirm]="是否继续将 %s 添加到 docker 组？[Y/n] "
+    [group_added]="已将用户 %s 添加到 docker 组"
+    [group_relogin]="请重新登录或执行 'newgrp docker' 使权限生效"
+    [group_skipped]="已跳过用户组配置"
+    [group_already]="用户 %s 已在 docker 组中"
+    [group_root]="当前以 root 用户执行，无需添加到 docker 组"
+    [no_sudo]="未检测到 sudo 命令，将直接使用 root 权限执行命令"
+    [select_mode]="请选择操作模式："
+    [mode_install]="1) 一键安装配置（推荐）"
+    [mode_mirror]="2) 修改镜像加速域名"
+    [mode_install_label]="模式：一键安装配置"
+    [mode_mirror_label]="模式：仅修改镜像加速域名"
+    [docker_exists]="检测到已安装 Docker 版本: %s"
+    [docker_exists_warn]="继续将进行 Docker 升级或重装，建议先备份重要数据"
+    [confirm_continue]="1) 确认继续安装/升级"
+    [confirm_back]="2) 返回选择菜单"
+    [user_confirmed]="用户确认继续"
+    [going_back]="返回选择菜单..."
+    [docker_not_installed]="Docker 未安装！建议选择选项 1 进行完整安装"
+    [mirror_config_done]="镜像配置完成！"
+    [service_restart_ok]="Docker 服务重启成功，新配置已生效"
+    [service_restart_err]="Docker 服务重启失败"
+    [service_not_running]="Docker 服务未运行，配置将在下次启动时生效"
+    [checking_system]="检查系统信息..."
+    [system_info]="系统: %s %s 架构: %s"
+    [docker_arch]="Docker 架构: %s"
+    [configuring_source]="配置 Docker 源..."
+    [install_done]="安装和配置完成！"
+    [docker_version_info]="Docker 版本: %s"
+    [detected_os]="检测到 %s %s，使用 %s 仓库"
+    [unsupported_os]="暂不支持该系统: %s %s"
+    [unsupported_version]="不支持 %s %s（仅支持 %s）"
+    [supported_list]="支持的系统: CentOS/RHEL/Rocky/AlmaLinux 8-10, openEuler 20+, OpenCloudOS, Anolis 8+, Alinux, Kylin, Fedora, Ubuntu, Debian, Kali"
+    [cannot_detect_codename]="无法检测 %s %s 的代号"
+    [macos_detected]="检测到 macOS 系统"
+    [macos_unsupported]="macOS 不支持此 Linux 安装脚本"
+    [macos_install_methods]="macOS 安装 Docker 的正确方式："
+    [macos_homebrew]="方法一：使用 Homebrew 安装（推荐）"
+    [macos_download]="方法二：下载官方安装包"
+    [macos_mirror_config]="配置 Docker 镜像加速"
+    [windows_detected]="检测到 Windows 系统"
+    [windows_unsupported]="Windows 不支持此 Linux 安装脚本"
+    [windows_install_methods]="Windows 安装 Docker 的正确方式："
+    [windows_desktop]="方法一：Docker Desktop（推荐）"
+    [windows_wsl]="方法二：在 WSL 2 中使用"
+    [mirror_required]="使用 --mode mirror 时，--mirror 必须设为 'public' 或一个域名"
+    [usage_header]="用法: bash docker.sh [选项]"
+    [usage_options]="选项："
+  )
+}
+
+# Print a translated message. Supports printf-style format args.
+# Usage: msg <key> [args...]
+msg() {
+  local key="$1"
+  shift
+  local template="${MESSAGES[$key]:-$key}"
+  if [[ $# -gt 0 ]]; then
+    # shellcheck disable=SC2059
+    printf "${template}\n" "$@"
+  else
+    echo "$template"
+  fi
+}
+
+# ============================================================
+# Defaults and CLI argument parsing
+# ============================================================
+LANG_CHOICE="en"
+MIRROR_CHOICE_ARG=""
+MODE_ARG=""
+AUTO_YES=false
+
+show_usage() {
+  init_messages_en
+  echo "Usage: bash docker.sh [OPTIONS]"
+  echo ""
+  echo "Options:"
+  echo "  --lang en|zh       UI language (default: en)"
+  echo "  --mirror <value>   Mirror config: none, public, or a custom domain"
+  echo "                     (default: none — uses Docker official registry)"
+  echo "  --mode <value>     Operation mode: install or mirror"
+  echo "                     (non-interactive when specified)"
+  echo "  -y, --yes          Skip interactive confirmations"
+  echo "  -h, --help         Show this help message"
+  echo ""
+  echo "Examples:"
+  echo "  bash docker.sh                              # Interactive (English)"
+  echo "  bash docker.sh --lang zh                    # Interactive (Chinese)"
+  echo "  bash docker.sh --mode install --yes         # Non-interactive install"
+  echo "  bash docker.sh --mode install --mirror public --yes"
+  echo "  bash docker.sh --mode mirror --mirror public"
+  echo "  bash docker.sh --mode mirror --mirror hub.example.com"
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lang)
+        LANG_CHOICE="$2"
+        shift 2
+        ;;
+      --mirror)
+        MIRROR_CHOICE_ARG="$2"
+        shift 2
+        ;;
+      --mode)
+        MODE_ARG="$2"
+        shift 2
+        ;;
+      -y|--yes)
+        AUTO_YES=true
+        shift
+        ;;
+      -h|--help)
+        show_usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1"
+        show_usage
+        exit 1
+        ;;
+    esac
+  done
+}
 
 get_latest_version() {
   local repo="$1" default="$2"
@@ -26,26 +344,26 @@ MIRROR_LIST=(
 )
 
 # ============================================================
-# 工具函数
+# Utility functions
 # ============================================================
 
-# 检查是否安装了 sudo，如果没有则创建一个函数来模拟 sudo
+# Set up sudo wrapper if sudo is not available
 setup_sudo() {
   if ! command -v sudo &> /dev/null; then
-    echo "⚠️  未检测到 sudo 命令，将直接使用 root 权限执行命令"
+    msg no_sudo
     sudo() { "$@"; }
     export -f sudo
   fi
 }
 
-# 清理临时文件
+# Clean up temp files on exit
 cleanup() {
   rm -f /tmp/docker.tgz /tmp/docker-ce-install.log /tmp/docker-ce-install-retry.log /tmp/docker-ce-install-mirror.log 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # ============================================================
-# TEST_MODE: 仅做系统支持性校验（用于 CI/本地容器矩阵）
+# TEST_MODE: Validate OS support only (for CI / container matrix)
 # ============================================================
 if [[ "${TEST_MODE:-0}" == "1" ]]; then
   OS="${OVERRIDE_OS_ID:-$(awk -F= '/^ID=/{print $2}' /etc/os-release | tr -d '"')}"
@@ -56,12 +374,12 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
   REPO_PATH=""
 
   case "$OS" in
-    # ---- RPM 系（CentOS 兼容仓库）----
+    # ---- RPM-based (CentOS-compatible repo) ----
     centos|rhel|rocky|almalinux|ol)
       case "$VERSION_MAJOR" in
         8|9|10) PKG_MANAGER="dnf" ;;
         *)
-          echo "UNSUPPORTED: $OS $VERSION_ID (仅支持 8/9/10)"
+          echo "UNSUPPORTED: $OS $VERSION_ID (only 8/9/10)"
           exit 1
           ;;
       esac
@@ -79,7 +397,7 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
       elif [[ "$VERSION_MAJOR" -ge 20 ]]; then
         REPO_PATH="centos/8"
       else
-        echo "UNSUPPORTED: openEuler $VERSION_ID (仅支持 20+)"
+        echo "UNSUPPORTED: openEuler $VERSION_ID (only 20+)"
         exit 1
       fi
       ;;
@@ -97,7 +415,7 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
         PKG_MANAGER="dnf"
         REPO_PATH="centos/8"
       else
-        echo "UNSUPPORTED: Anolis $VERSION_ID (仅支持 8+)"
+        echo "UNSUPPORTED: Anolis $VERSION_ID (only 8+)"
         exit 1
       fi
       ;;
@@ -122,7 +440,7 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
       REPO_PATH="fedora/$VERSION_ID"
       ;;
 
-    # ---- Debian 系 ----
+    # ---- Debian-based ----
     ubuntu)
       PKG_MANAGER="apt-get"
       case "$VERSION_ID" in
@@ -132,7 +450,7 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
         18.04) CODENAME="bionic" ;;
       esac
       if [[ -z "$CODENAME" ]]; then
-        echo "UNSUPPORTED: Ubuntu $VERSION_ID (无法确定代号)"
+        echo "UNSUPPORTED: Ubuntu $VERSION_ID (cannot detect codename)"
         exit 1
       fi
       REPO_PATH="ubuntu/$CODENAME"
@@ -146,7 +464,7 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
         11) CODENAME="bullseye" ;;
       esac
       if [[ -z "$CODENAME" ]]; then
-        echo "UNSUPPORTED: Debian $VERSION_ID (无法确定代号)"
+        echo "UNSUPPORTED: Debian $VERSION_ID (cannot detect codename)"
         exit 1
       fi
       REPO_PATH="debian/$CODENAME"
@@ -171,47 +489,49 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
 fi
 
 # ============================================================
-# 版本号（自动获取最新版，API 不可用时使用默认值）
+# Version numbers (auto-detect latest, fallback to defaults)
 # ============================================================
-echo "正在获取最新版本号..."
-DOCKER_BINARY_VERSION=$(get_latest_version "moby/moby" "29.2.1")
-DOCKER_COMPOSE_V2_VERSION=$(get_latest_version "docker/compose" "2.36.0")
-echo "  Docker: ${DOCKER_BINARY_VERSION}  |  Compose: ${DOCKER_COMPOSE_V2_VERSION}"
+fetch_versions() {
+  msg fetching_versions
+  DOCKER_BINARY_VERSION=$(get_latest_version "moby/moby" "29.2.1")
+  DOCKER_COMPOSE_V2_VERSION=$(get_latest_version "docker/compose" "2.36.0")
+  msg version_info "$DOCKER_BINARY_VERSION" "$DOCKER_COMPOSE_V2_VERSION"
+}
 
 # ============================================================
-# 镜像源管理
+# Mirror source management
 # ============================================================
 
-# try_mirror_download <路径后缀> <输出文件> [超时秒数]
-# 依次尝试所有镜像源下载指定文件，成功返回 0
+# try_mirror_download <url_suffix> <output_file> [timeout_seconds]
+# Try all mirror sources in order, return 0 on first success
 try_mirror_download() {
   local suffix="$1" output="$2" timeout="${3:-60}"
   for mirror in "${MIRROR_LIST[@]}"; do
     local url="${mirror}${suffix}"
-    echo "  尝试下载: $url"
+    msg try_download "$url"
     if curl -fsSL "$url" -o "$output" --connect-timeout 10 --max-time "$timeout" 2>/dev/null; then
-      echo "  ✅ 下载成功"
+      msg download_ok
       return 0
     fi
   done
-  echo "  ❌ 所有源下载失败"
+  msg download_all_failed
   return 1
 }
 
 # setup_rpm_repo <pkg_manager> <centos_version>
-# 为 RPM 系发行版配置 Docker CE 仓库，自动尝试多个镜像源
+# Configure Docker CE repo for RPM-based distros
 setup_rpm_repo() {
   local pkg_mgr="$1" centos_ver="$2"
 
   sudo "$pkg_mgr" install -y "${pkg_mgr}-utils" 2>/dev/null || true
 
-  echo "正在配置 Docker CE 仓库 (centos/${centos_ver})..."
+  msg configuring_repo "centos/${centos_ver}"
 
   for mirror in "${MIRROR_LIST[@]}"; do
     local base_url="${mirror}/linux/centos/${centos_ver}/\$basearch/stable"
     local gpg_url="${mirror}/linux/centos/gpg"
 
-    echo "  尝试源: $mirror"
+    msg try_source "$mirror"
     sudo tee /etc/yum.repos.d/docker-ce.repo > /dev/null <<REPOEOF
 [docker-ce-stable]
 name=Docker CE Stable - \$basearch
@@ -223,29 +543,29 @@ REPOEOF
 
     sudo "$pkg_mgr" clean all 2>/dev/null || true
     if sudo "$pkg_mgr" makecache 2>/dev/null; then
-      echo "  ✅ 源配置成功: $mirror"
+      msg source_ok "$mirror"
       return 0
     fi
   done
 
-  echo "❌ 所有 Docker 源都配置失败"
+  msg source_all_failed
   return 1
 }
 
-# setup_fedora_repo <centos_version>
-# 为 Fedora 配置 Docker CE 仓库
+# setup_fedora_repo <fedora_version>
+# Configure Docker CE repo for Fedora
 setup_fedora_repo() {
   local fedora_ver="$1"
 
   sudo dnf install -y dnf-plugins-core 2>/dev/null || true
 
-  echo "正在配置 Docker CE 仓库 (fedora/${fedora_ver})..."
+  msg configuring_repo "fedora/${fedora_ver}"
 
   for mirror in "${MIRROR_LIST[@]}"; do
     local base_url="${mirror}/linux/fedora/${fedora_ver}/\$basearch/stable"
     local gpg_url="${mirror}/linux/fedora/gpg"
 
-    echo "  尝试源: $mirror"
+    msg try_source "$mirror"
     sudo tee /etc/yum.repos.d/docker-ce.repo > /dev/null <<REPOEOF
 [docker-ce-stable]
 name=Docker CE Stable - \$basearch
@@ -257,166 +577,165 @@ REPOEOF
 
     sudo dnf clean all 2>/dev/null || true
     if sudo dnf makecache 2>/dev/null; then
-      echo "  ✅ 源配置成功: $mirror"
+      msg source_ok "$mirror"
       return 0
     fi
   done
 
-  echo "❌ 所有 Docker 源都配置失败"
+  msg source_all_failed
   return 1
 }
 
-# setup_deb_repo
-# 为 Debian/Ubuntu/Kali 配置 Docker CE APT 仓库
+# setup_deb_repo <os_id> <codename>
+# Configure Docker CE APT repo for Debian/Ubuntu/Kali
 setup_deb_repo() {
   local os_id="$1" codename="$2"
 
-  # Kali 基于 Debian，使用 debian 仓库
+  # Kali is Debian-based, use debian repo
   local repo_os="$os_id"
   [[ "$os_id" == "kali" ]] && repo_os="debian"
 
-  # 安装前置依赖
+  # Install prerequisites
   sudo apt-get update -qq 2>/dev/null || true
   sudo apt-get install -y ca-certificates curl gnupg 2>/dev/null || true
 
-  echo "正在配置 Docker CE APT 仓库 (${repo_os}/${codename})..."
+  msg configuring_apt "${repo_os}/${codename}"
 
   for mirror in "${MIRROR_LIST[@]}"; do
     local gpg_url="${mirror}/linux/${repo_os}/gpg"
     local repo_url="${mirror}/linux/${repo_os}"
 
-    echo "  尝试源: $mirror"
+    msg try_source "$mirror"
 
-    # 导入 GPG 密钥
+    # Import GPG key
     sudo install -m 0755 -d /etc/apt/keyrings 2>/dev/null || true
     if curl -fsSL "$gpg_url" 2>/dev/null | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg 2>/dev/null; then
       sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
-      # 添加仓库
+      # Add repository
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] ${repo_url} ${codename} stable" | \
         sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
       if sudo apt-get update -qq 2>/dev/null; then
-        echo "  ✅ APT 源配置成功: $mirror"
+        msg apt_source_ok "$mirror"
         return 0
       fi
     fi
   done
 
-  echo "❌ 所有 Docker APT 源都配置失败"
+  msg apt_source_all_failed
   return 1
 }
 
 # ============================================================
-# Docker 安装函数
+# Docker installation functions
 # ============================================================
 
 # install_docker_rpm <pkg_manager>
-# 通过 RPM 包管理器安装 Docker CE
+# Install Docker CE via RPM package manager
 install_docker_rpm() {
   local pkg_mgr="$1"
 
-  echo ">>> [3/8] 安装 Docker CE..."
+  msg installing_docker
 
-  # 处理 iSulad 冲突 (openEuler)
+  # Handle iSulad conflict (openEuler)
   if rpm -q iSulad &>/dev/null; then
-    echo "⚠️  检测到 iSulad，需要卸载以避免与 Docker CE 冲突"
+    msg isulad_detected
     sudo "$pkg_mgr" remove -y iSulad 2>/dev/null || true
   fi
 
   set +e
 
-  # 尝试批量安装
+  # Try batch install
   if sudo "$pkg_mgr" install -y --allowerasing docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1; then
-    echo "✅ Docker CE 安装成功"
+    msg docker_installed
     set -e
     return 0
   fi
 
-  echo "❌ 批量安装失败，尝试逐个安装..."
+  msg batch_install_failed
 
-  # 逐个安装核心组件
+  # Install core components one by one
   for pkg in containerd.io docker-ce-cli docker-ce docker-buildx-plugin docker-compose-plugin; do
-    echo "  安装 $pkg..."
+    msg installing_pkg "$pkg"
     if sudo "$pkg_mgr" install -y --allowerasing "$pkg" 2>&1; then
-      echo "  ✅ $pkg 安装成功"
+      msg pkg_installed "$pkg"
     else
-      echo "  ⚠️  $pkg 安装失败"
+      msg pkg_failed "$pkg"
     fi
   done
 
   set -e
 
-  # 检查核心组件
+  # Verify core components
   if command -v docker &>/dev/null && { [ -f /usr/lib/systemd/system/docker.service ] || [ -f /etc/systemd/system/docker.service ]; }; then
-    echo "✅ Docker CE 核心组件安装完成"
+    msg core_installed
     return 0
   fi
 
-  echo "❌ 包管理器安装失败，回退到二进制安装..."
+  msg pkg_fallback_binary
   install_docker_binary
 }
 
 # install_docker_deb
-# 通过 APT 安装 Docker CE
+# Install Docker CE via APT
 install_docker_deb() {
-  echo ">>> [3/8] 安装 Docker CE..."
+  msg installing_docker
 
   set +e
 
   if sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1; then
-    echo "✅ Docker CE 安装成功"
+    msg docker_installed
     set -e
     return 0
   fi
 
-  echo "❌ 批量安装失败，尝试逐个安装..."
+  msg batch_install_failed
 
   for pkg in containerd.io docker-ce-cli docker-ce docker-buildx-plugin docker-compose-plugin; do
-    echo "  安装 $pkg..."
+    msg installing_pkg "$pkg"
     if sudo apt-get install -y "$pkg" 2>&1; then
-      echo "  ✅ $pkg 安装成功"
+      msg pkg_installed "$pkg"
     else
-      echo "  ⚠️  $pkg 安装失败"
+      msg pkg_failed "$pkg"
     fi
   done
 
   set -e
 
   if command -v docker &>/dev/null; then
-    echo "✅ Docker CE 核心组件安装完成"
+    msg core_installed
     return 0
   fi
 
-  echo "❌ APT 安装失败，回退到二进制安装..."
+  msg apt_fallback_binary
   install_docker_binary
 }
 
 # install_docker_binary
-# 下载并安装 Docker 静态二进制包（最终兜底方案）
+# Download and install Docker static binary (final fallback)
 install_docker_binary() {
-  echo "正在下载 Docker ${DOCKER_BINARY_VERSION} 二进制包..."
+  msg downloading_binary "$DOCKER_BINARY_VERSION"
 
   if ! try_mirror_download "/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_BINARY_VERSION}.tgz" /tmp/docker.tgz 120; then
-    echo "❌ 所有下载源都失败，无法安装 Docker"
-    echo "请检查网络连接或手动安装 Docker"
+    msg binary_all_failed
+    msg check_network
     exit 1
   fi
 
-  echo "正在解压并安装..."
+  msg extracting
   sudo tar -xzf /tmp/docker.tgz -C /usr/bin --strip-components=1
   sudo chmod +x /usr/bin/docker*
 
-  # SELinux 提示
+  # SELinux warning
   if command -v getenforce &> /dev/null && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
     echo ""
-    echo "⚠️  检测到 SELinux 处于开启状态 ($(getenforce))"
-    echo "⚠️  二进制安装方式可能会遇到 SELinux 上下文问题"
-    echo "💡 推荐：安装 container-selinux >= 2.74 或临时执行 setenforce 0"
+    msg selinux_warning "$(getenforce)"
+    msg selinux_tip
     echo ""
   fi
 
-  # 创建 systemd 服务文件
+  # Create systemd service files
   sudo tee /etc/systemd/system/docker.service > /dev/null <<'SVCEOF'
 [Unit]
 Description=Docker Application Container Engine
@@ -461,23 +780,23 @@ WantedBy=sockets.target
 SOCKEOF
 
   sudo groupadd docker 2>/dev/null || true
-  echo "✅ Docker 二进制安装成功"
+  msg binary_installed
 }
 
 # ============================================================
-# Docker Compose 安装
+# Docker Compose installation
 # ============================================================
 install_docker_compose() {
-  echo ">>> [4/8] 安装 Docker Compose..."
+  msg installing_compose
 
-  # 先检查 docker-compose-plugin 是否已通过包管理器安装
+  # Check if docker-compose-plugin is already installed via package manager
   if docker compose version &>/dev/null 2>&1; then
-    echo "✅ Docker Compose (插件版) 已安装: $(docker compose version 2>/dev/null || echo 'unknown')"
+    msg compose_already "$(docker compose version 2>/dev/null || echo 'unknown')"
     return 0
   fi
 
-  # 尝试下载独立 Docker Compose v2 二进制
-  echo "正在下载 Docker Compose v${DOCKER_COMPOSE_V2_VERSION}..."
+  # Try downloading standalone Docker Compose v2 binary
+  msg downloading_compose "$DOCKER_COMPOSE_V2_VERSION"
 
   local compose_arch
   case "$DOCKER_ARCH" in
@@ -489,22 +808,21 @@ install_docker_compose() {
 
   local compose_suffix="/linux/compose/v${DOCKER_COMPOSE_V2_VERSION}/docker-compose-linux-${compose_arch}"
 
-  # 先尝试国内镜像源的 docker-compose v2 二进制
+  # Try mirror sources for docker-compose v2 binary
   local downloaded=false
   for mirror in "${MIRROR_LIST[@]}"; do
-    # 国内镜像源路径格式不同
     local url
     if [[ "$mirror" == "https://download.docker.com" ]]; then
-      # 官方使用 GitHub Releases
+      # Official source uses GitHub Releases
       url="https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_V2_VERSION}/docker-compose-linux-${compose_arch}"
     else
       url="${mirror}${compose_suffix}"
     fi
 
-    echo "  尝试: $url"
+    msg try_download "$url"
     if sudo curl -fsSL "$url" -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 60 2>/dev/null; then
       downloaded=true
-      echo "  ✅ 下载成功"
+      msg download_ok
       break
     fi
   done
@@ -512,82 +830,102 @@ install_docker_compose() {
   if [[ "$downloaded" == "true" ]]; then
     sudo chmod +x /usr/local/bin/docker-compose
     sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose 2>/dev/null || true
-    echo "✅ Docker Compose v${DOCKER_COMPOSE_V2_VERSION} 安装完成"
+    msg compose_installed "$DOCKER_COMPOSE_V2_VERSION"
   else
-    echo "⚠️  Docker Compose 独立二进制下载失败"
-    echo "💡 您仍可以使用 'docker compose'（如果插件已安装）或手动安装"
+    msg compose_failed
+    msg compose_tip
   fi
 }
 
 # ============================================================
-# 启动 Docker 服务
+# Start Docker service
 # ============================================================
 start_docker_service() {
-  echo ">>> [5/8] 启动 Docker 服务..."
+  msg starting_docker
 
-  # 检查 docker.service 文件是否存在
+  # Check if docker.service file exists
   if [ ! -f /etc/systemd/system/docker.service ] && [ ! -f /usr/lib/systemd/system/docker.service ]; then
-    echo "❌ docker.service 文件不存在，Docker 服务无法启动"
+    msg service_missing
     exit 1
   fi
 
   sudo systemctl daemon-reload 2>/dev/null || true
-  sudo systemctl enable docker 2>/dev/null && echo "✅ Docker 已设为开机自启" || echo "⚠️  开机自启设置失败"
-  if sudo systemctl start docker 2>/dev/null; then
-    echo "✅ Docker 服务启动成功"
+  if sudo systemctl enable docker 2>/dev/null; then
+    msg autostart_ok
   else
-    echo "⚠️  Docker 服务启动失败，尝试查看日志..."
+    msg autostart_failed
+  fi
+  if sudo systemctl start docker 2>/dev/null; then
+    msg service_started
+  else
+    msg service_start_failed
     sudo systemctl status docker --no-pager -l 2>/dev/null || true
-    echo "💡 可尝试手动启动: sudo dockerd &"
+    msg service_start_tip
   fi
 }
 
 # ============================================================
-# 镜像加速 & daemon.json 配置
+# Mirror acceleration & daemon.json configuration
 # ============================================================
+
+# configure_daemon_json <mirror_mode> [custom_domain]
+# mirror_mode: "none", "public", "custom"
 configure_daemon_json() {
-  local choice="$1"
+  local mirror_mode="$1"
   local custom_domain="${2:-}"
 
-  echo ">>> [6/8] 配置镜像加速..."
+  msg configuring_mirror
 
   sudo mkdir -p /etc/docker
 
-  # 备份现有配置
+  # Backup existing config
   if [ -f /etc/docker/daemon.json ]; then
     sudo cp /etc/docker/daemon.json "/etc/docker/daemon.json.backup.$(date +%Y%m%d_%H%M%S)"
-    echo "✅ 已备份现有配置"
+    msg backup_ok
   fi
 
-  # 清理用户输入的域名
+  # Clean user input
   custom_domain="${custom_domain#http://}"
   custom_domain="${custom_domain#https://}"
 
-  # 构建 mirror_list
+  # Build mirror_list and insecure_registries
   local mirror_list insecure_registries
-  if [[ "$choice" == "2" && -n "$custom_domain" ]]; then
-    if [[ "$custom_domain" == *.example.run ]]; then
-      local custom_domain_dev="${custom_domain%.example.run}.example.dev"
-      mirror_list="[\"https://$custom_domain\",\"https://$custom_domain_dev\",\"https://docker.m.daocloud.io\"]"
-      insecure_registries="[\"$custom_domain\",\"$custom_domain_dev\"]"
-    else
-      mirror_list="[\"https://$custom_domain\",\"https://docker.m.daocloud.io\"]"
-      insecure_registries="[\"$custom_domain\"]"
-    fi
-  else
-    mirror_list='["https://docker.m.daocloud.io"]'
-    insecure_registries='[]'
-  fi
+  case "$mirror_mode" in
+    public)
+      mirror_list='["https://docker.m.daocloud.io"]'
+      insecure_registries='[]'
+      ;;
+    custom)
+      if [[ -n "$custom_domain" ]]; then
+        if [[ "$custom_domain" == *.example.run ]]; then
+          local custom_domain_dev="${custom_domain%.example.run}.example.dev"
+          mirror_list="[\"https://$custom_domain\",\"https://$custom_domain_dev\",\"https://docker.m.daocloud.io\"]"
+          insecure_registries="[\"$custom_domain\",\"$custom_domain_dev\"]"
+        else
+          mirror_list="[\"https://$custom_domain\",\"https://docker.m.daocloud.io\"]"
+          insecure_registries="[\"$custom_domain\"]"
+        fi
+      else
+        mirror_list='["https://docker.m.daocloud.io"]'
+        insecure_registries='[]'
+      fi
+      ;;
+    *)
+      # none — no mirrors
+      mirror_list='[]'
+      insecure_registries='[]'
+      ;;
+  esac
 
-  # DNS 配置（仅在系统无 DNS 时添加）
+  # DNS config (only add if system has no DNS)
   local dns_line=""
   if [[ "${SKIP_DNS:-}" != "true" ]]; then
     if ! grep -q "nameserver" /etc/resolv.conf 2>/dev/null; then
       dns_line=',
   "dns": ["119.29.29.29", "114.114.114.114"]'
-      echo "ℹ️  系统未配置 DNS，已自动添加 Docker DNS"
+      msg no_dns_added
     else
-      echo "ℹ️  系统已有 DNS 配置，跳过 Docker DNS 设置"
+      msg dns_exists
     fi
   fi
 
@@ -598,74 +936,93 @@ configure_daemon_json() {
 }
 JSONEOF
 
-  echo "✅ daemon.json 配置完成"
+  msg daemon_json_ok
 
-  # 显示当前配置的镜像源
-  echo "当前配置的镜像源:"
-  if [[ "$choice" == "2" && -n "$custom_domain" ]]; then
-    echo "  - https://$custom_domain (优先)"
-    [[ "$custom_domain" == *.example.run ]] && echo "  - https://${custom_domain%.example.run}.example.dev (备用)"
+  # Display configured mirrors
+  if [[ "$mirror_mode" != "none" ]]; then
+    msg current_mirrors
+    if [[ "$mirror_mode" == "custom" && -n "$custom_domain" ]]; then
+      msg mirror_priority "$custom_domain"
+      [[ "$custom_domain" == *.example.run ]] && msg mirror_fallback "${custom_domain%.example.run}.example.dev"
+    fi
+    echo "  - https://docker.m.daocloud.io"
   fi
-  echo "  - https://docker.m.daocloud.io"
 }
 
-# 询问用户选择镜像加速配置，返回 choice 和 custom_domain
+# Ask user to select mirror config interactively
+# Sets MIRROR_MODE and CUSTOM_DOMAIN
 ask_mirror_choice() {
   echo ""
-  echo "请选择镜像加速版本:"
-  echo "1) 使用公共加速域名 (docker.m.daocloud.io)"
-  echo "2) 使用自定义加速域名 (自定义 + docker.m.daocloud.io)"
+  msg select_mirror
+  msg mirror_opt_none
+  msg mirror_opt_public
+  msg mirror_opt_custom
 
   while true; do
-    read -rp "请输入选择 [1/2]: " MIRROR_CHOICE
-    if [[ "$MIRROR_CHOICE" == "1" || "$MIRROR_CHOICE" == "2" ]]; then
-      break
-    fi
-    echo "❌ 无效选择，请输入 1 或 2"
+    # shellcheck disable=SC2059
+    printf "$(msg enter_choice "1/2/3")" ""
+    read -r MIRROR_INPUT
+    MIRROR_INPUT="${MIRROR_INPUT:-1}"
+    case "$MIRROR_INPUT" in
+      1) MIRROR_MODE="none"; break ;;
+      2) MIRROR_MODE="public"; break ;;
+      3) MIRROR_MODE="custom"; break ;;
+      *) msg invalid_choice ;;
+    esac
   done
 
   CUSTOM_DOMAIN=""
-  if [[ "$MIRROR_CHOICE" == "2" ]]; then
-    read -rp "请输入您的自定义镜像加速域名: " CUSTOM_DOMAIN
+  if [[ "$MIRROR_MODE" == "custom" ]]; then
+    # shellcheck disable=SC2059
+    printf "%s" "$(msg enter_custom_domain)"
+    read -r CUSTOM_DOMAIN
   fi
 }
 
-# 重载并重启 Docker
+# Reload and restart Docker
 restart_docker() {
-  echo ">>> [7/8] 重载 Docker 配置..."
+  msg reloading_docker
   sudo systemctl daemon-reexec 2>/dev/null || true
   sudo systemctl restart docker 2>/dev/null || true
 
-  echo "等待 Docker 服务启动..."
+  msg waiting_docker
   sleep 3
 
   if systemctl is-active --quiet docker 2>/dev/null; then
-    echo "✅ Docker 服务已成功启动"
+    msg service_restarted
   else
-    echo "❌ Docker 服务启动失败，请检查配置"
+    msg service_restart_failed
     exit 1
   fi
 }
 
-# 配置用户权限
+# Configure user permissions
 setup_user_group() {
-  echo ">>> [8/8] 配置用户权限..."
+  msg configuring_user
 
   add_user_to_docker_group() {
     local target_user="$1"
     if ! groups "$target_user" 2>/dev/null | grep -q "\bdocker\b"; then
-      echo "⚠️  将用户 $target_user 加入 docker 组意味着赋予该用户 root 级权限。"
-      read -rp "是否继续将 $target_user 添加到 docker 组？[Y/n] " confirm
-      confirm=${confirm:-Y}
-      if [[ "$confirm" =~ ^[Yy]$ ]]; then
+      if [[ "$AUTO_YES" == "true" ]]; then
         sudo usermod -aG docker "$target_user" 2>/dev/null || true
-        echo "✅ 已将用户 $target_user 添加到 docker 组"
-        echo "⚠️  请重新登录或执行 'newgrp docker' 使权限生效"
+        msg group_added "$target_user"
+        msg group_relogin
       else
-        echo "ℹ️  已跳过用户组配置"
+        msg group_warning "$target_user"
+        # shellcheck disable=SC2059
+        printf "%s" "$(msg group_confirm "$target_user")"
+        read -r confirm
+        confirm=${confirm:-Y}
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          sudo usermod -aG docker "$target_user" 2>/dev/null || true
+          msg group_added "$target_user"
+          msg group_relogin
+        else
+          msg group_skipped
+        fi
       fi
     else
-      echo "✅ 用户 $target_user 已在 docker 组中"
+      msg group_already "$target_user"
     fi
   }
 
@@ -674,96 +1031,93 @@ setup_user_group() {
   elif [ "$(id -u)" -ne 0 ]; then
     add_user_to_docker_group "$USER"
   else
-    echo "ℹ️  当前以 root 用户执行，无需添加到 docker 组"
+    msg group_root
   fi
 }
 
 # ============================================================
-# 非 Linux 系统检测与引导
+# Non-Linux system detection and guidance
 # ============================================================
 show_macos_guide() {
-  cat <<'MACEOF'
-🍎 检测到 macOS 系统
-==========================================
-⚠️  macOS 不支持此 Linux 安装脚本
-==========================================
-
-📋 macOS 安装 Docker 的正确方式：
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-方法一：使用 Homebrew 安装（推荐）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  1. 安装 Homebrew:
-     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-  2. 安装 Docker Desktop:
-     brew install --cask docker
-
-  3. 启动 Docker Desktop
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-方法二：下载官方安装包
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  https://www.docker.com/products/docker-desktop
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 配置 Docker 镜像加速
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Docker Desktop → Settings → Docker Engine → 添加:
-  {
-    "registry-mirrors": ["https://docker.m.daocloud.io"]
-  }
-==========================================
-MACEOF
+  echo "=========================================="
+  msg macos_detected
+  echo "=========================================="
+  msg macos_unsupported
+  echo ""
+  msg macos_install_methods
+  echo ""
+  echo "---"
+  msg macos_homebrew
+  echo "---"
+  echo "  1. Install Homebrew:"
+  # shellcheck disable=SC2016
+  echo '     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+  echo ""
+  echo "  2. Install Docker Desktop:"
+  echo "     brew install --cask docker"
+  echo ""
+  echo "  3. Launch Docker Desktop"
+  echo ""
+  echo "---"
+  msg macos_download
+  echo "---"
+  echo "  https://www.docker.com/products/docker-desktop"
+  echo ""
+  echo "---"
+  msg macos_mirror_config
+  echo "---"
+  echo '  Docker Desktop -> Settings -> Docker Engine -> Add:'
+  echo '  {'
+  echo '    "registry-mirrors": ["https://docker.m.daocloud.io"]'
+  echo '  }'
+  echo "=========================================="
 }
 
 show_windows_guide() {
-  cat <<'WINEOF'
-🪟 检测到 Windows 系统
-==========================================
-⚠️  Windows 不支持此 Linux 安装脚本
-==========================================
-
-📋 Windows 安装 Docker 的正确方式：
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-方法一：Docker Desktop（推荐）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  https://www.docker.com/products/docker-desktop
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-方法二：在 WSL 2 中使用
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  1. wsl --install
-  2. 在 WSL 2 中运行本安装脚本
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 配置 Docker 镜像加速
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Docker Desktop → Settings → Docker Engine → 添加:
-  {
-    "registry-mirrors": ["https://docker.m.daocloud.io"]
-  }
-
-📚 官方文档: https://docs.docker.com/desktop/install/windows-install/
-==========================================
-WINEOF
+  echo "=========================================="
+  msg windows_detected
+  echo "=========================================="
+  msg windows_unsupported
+  echo ""
+  msg windows_install_methods
+  echo ""
+  echo "---"
+  msg windows_desktop
+  echo "---"
+  echo "  https://www.docker.com/products/docker-desktop"
+  echo ""
+  echo "---"
+  msg windows_wsl
+  echo "---"
+  echo "  1. wsl --install"
+  echo "  2. Run this script inside WSL 2"
+  echo ""
+  echo "---"
+  msg macos_mirror_config
+  echo "---"
+  echo '  Docker Desktop -> Settings -> Docker Engine -> Add:'
+  echo '  {'
+  echo '    "registry-mirrors": ["https://docker.m.daocloud.io"]'
+  echo '  }'
+  echo ""
+  echo "  Docs: https://docs.docker.com/desktop/install/windows-install/"
+  echo "=========================================="
 }
 
 # ============================================================
-# 系统检测：映射 OS → 安装策略
+# OS detection: Map OS -> install strategy
 # ============================================================
-# 返回值赋给全局变量:
-#   INSTALL_TYPE:    rpm / deb
+# Sets global variables:
+#   INSTALL_TYPE:    rpm / deb / fedora
 #   PKG_MANAGER:     yum / dnf / apt-get
-#   CENTOS_VERSION:  8 / 9 / 10 (仅 rpm)
-#   DEB_CODENAME:    bookworm / jammy 等 (仅 deb)
+#   CENTOS_VERSION:  8 / 9 / 10 (rpm only)
+#   DEB_CODENAME:    bookworm / jammy etc (deb only)
 detect_install_strategy() {
   local os_lower
   os_lower=$(echo "$OS" | tr '[:upper:]' '[:lower:]')
 
   case "$os_lower" in
-    # ------ RPM 系（CentOS 兼容仓库） ------
+    # ------ RPM-based (CentOS-compatible repo) ------
     centos|rhel|rocky|almalinux|ol)
       INSTALL_TYPE="rpm"
       VERSION_MAJOR="${VERSION_ID%%.*}"
@@ -777,10 +1131,10 @@ detect_install_strategy() {
         CENTOS_VERSION="8"
         PKG_MANAGER="dnf"
       else
-        echo "❌ 不支持 $OS $VERSION_ID（仅支持 8/9/10+）"
+        msg unsupported_version "$OS" "$VERSION_ID" "8/9/10+"
         exit 1
       fi
-      echo "✅ 检测到 $OS $VERSION_ID，使用 CentOS ${CENTOS_VERSION} 仓库"
+      msg detected_os "$OS" "$VERSION_ID" "CentOS ${CENTOS_VERSION}"
       ;;
 
     openeuler)
@@ -793,17 +1147,17 @@ detect_install_strategy() {
         CENTOS_VERSION="8"
         PKG_MANAGER="dnf"
       else
-        echo "❌ openEuler $VERSION_ID 版本过低，仅支持 20+"
+        msg unsupported_version "openEuler" "$VERSION_ID" "20+"
         exit 1
       fi
-      echo "✅ 检测到 openEuler $VERSION_ID，使用 CentOS ${CENTOS_VERSION} 兼容仓库"
+      msg detected_os "openEuler" "$VERSION_ID" "CentOS ${CENTOS_VERSION}"
       ;;
 
     opencloudos)
       INSTALL_TYPE="rpm"
       CENTOS_VERSION="9"
       PKG_MANAGER="dnf"
-      echo "✅ 检测到 OpenCloudOS $VERSION_ID，使用 CentOS 9 兼容仓库"
+      msg detected_os "OpenCloudOS" "$VERSION_ID" "CentOS 9"
       ;;
 
     anolis)
@@ -815,10 +1169,10 @@ detect_install_strategy() {
         CENTOS_VERSION="8"
         PKG_MANAGER="dnf"
       else
-        echo "❌ Anolis OS $VERSION_ID 版本过低，仅支持 8+"
+        msg unsupported_version "Anolis OS" "$VERSION_ID" "8+"
         exit 1
       fi
-      echo "✅ 检测到 Anolis OS $VERSION_ID，使用 CentOS ${CENTOS_VERSION} 兼容仓库"
+      msg detected_os "Anolis OS" "$VERSION_ID" "CentOS ${CENTOS_VERSION}"
       ;;
 
     alinux)
@@ -830,49 +1184,49 @@ detect_install_strategy() {
         CENTOS_VERSION="8"
         PKG_MANAGER="yum"
       fi
-      echo "✅ 检测到 Alibaba Cloud Linux $VERSION_ID，使用 CentOS ${CENTOS_VERSION} 兼容仓库"
+      msg detected_os "Alibaba Cloud Linux" "$VERSION_ID" "CentOS ${CENTOS_VERSION}"
       ;;
 
     kylin)
       INSTALL_TYPE="rpm"
-      # 银河麒麟基于 RHEL
+      # Kylin is based on RHEL
       if command -v dnf &>/dev/null; then
         PKG_MANAGER="dnf"
         CENTOS_VERSION="8"
       else
-        echo "❌ Kylin $VERSION_ID 版本过低，仅支持使用 dnf 的版本"
+        msg unsupported_version "Kylin" "$VERSION_ID" "dnf-based"
         exit 1
       fi
-      echo "✅ 检测到银河麒麟 (Kylin) $VERSION_ID，使用 CentOS ${CENTOS_VERSION} 兼容仓库"
+      msg detected_os "Kylin" "$VERSION_ID" "CentOS ${CENTOS_VERSION}"
       ;;
 
     fedora)
       INSTALL_TYPE="fedora"
       PKG_MANAGER="dnf"
       CENTOS_VERSION="${VERSION_ID}"
-      echo "✅ 检测到 Fedora $VERSION_ID，使用 Fedora 仓库"
+      msg detected_os "Fedora" "$VERSION_ID" "Fedora"
       ;;
 
-    # ------ Debian 系 ------
+    # ------ Debian-based ------
     ubuntu)
       INSTALL_TYPE="deb"
       PKG_MANAGER="apt-get"
-      # Ubuntu 版本代号映射
+      # Ubuntu version codename mapping
       case "$VERSION_ID" in
         24.04) DEB_CODENAME="noble" ;;
         22.04) DEB_CODENAME="jammy" ;;
         20.04) DEB_CODENAME="focal" ;;
         18.04) DEB_CODENAME="bionic" ;;
         *)
-          # 尝试从 /etc/os-release 获取
+          # Try from /etc/os-release
           DEB_CODENAME=$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release | tr -d '"')
           if [[ -z "$DEB_CODENAME" ]]; then
-            echo "❌ 无法检测 Ubuntu $VERSION_ID 的代号"
+            msg cannot_detect_codename "Ubuntu" "$VERSION_ID"
             exit 1
           fi
           ;;
       esac
-      echo "✅ 检测到 Ubuntu $VERSION_ID ($DEB_CODENAME)"
+      msg detected_os "Ubuntu" "$VERSION_ID ($DEB_CODENAME)" "Ubuntu"
       ;;
 
     debian)
@@ -885,47 +1239,55 @@ detect_install_strategy() {
         *)
           DEB_CODENAME=$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release | tr -d '"')
           if [[ -z "$DEB_CODENAME" ]]; then
-            echo "❌ 无法检测 Debian $VERSION_ID 的代号"
+            msg cannot_detect_codename "Debian" "$VERSION_ID"
             exit 1
           fi
           ;;
       esac
-      echo "✅ 检测到 Debian $VERSION_ID ($DEB_CODENAME)"
+      msg detected_os "Debian" "$VERSION_ID ($DEB_CODENAME)" "Debian"
       ;;
 
     kali)
       INSTALL_TYPE="deb"
       PKG_MANAGER="apt-get"
-      # Kali 使用对应的 Debian 代号
+      # Kali uses corresponding Debian codename
       DEB_CODENAME=$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release | tr -d '"')
       if [[ -z "$DEB_CODENAME" ]]; then
         DEB_CODENAME="bookworm"
       fi
-      echo "✅ 检测到 Kali Linux，使用 Debian ($DEB_CODENAME) 兼容仓库"
+      msg detected_os "Kali Linux" "" "Debian ($DEB_CODENAME)"
       ;;
 
     *)
-      echo "❌ 暂不支持该系统: $OS $VERSION_ID"
-      echo "💡 支持的系统: CentOS/RHEL/Rocky/AlmaLinux 8-10, openEuler 20+,"
-      echo "   OpenCloudOS, Anolis 8+, Alinux, Kylin, Fedora, Ubuntu, Debian, Kali"
+      msg unsupported_os "$OS" "$VERSION_ID"
+      msg supported_list
       exit 1
       ;;
   esac
 }
 
 # ============================================================
-# 主流程
+# Main flow
 # ============================================================
 main() {
+  parse_args "$@"
+
+  # Initialize i18n
+  if [[ "$LANG_CHOICE" == "zh" ]]; then
+    init_messages_zh
+  else
+    init_messages_en
+  fi
+
   setup_sudo
 
   echo "=========================================="
-  echo "🐳 欢迎使用 Docker 一键安装配置脚本"
+  msg welcome
   echo "=========================================="
-  echo "官方网站: https://docs.docker.com"
+  msg official_site
   echo ""
 
-  # 检测非 Linux 系统
+  # Detect non-Linux systems
   local detected_os
   detected_os=$(uname -s 2>/dev/null || echo "Unknown")
 
@@ -939,94 +1301,125 @@ main() {
     exit 0
   fi
 
-  # 交互式选择操作模式
-  echo "请选择操作模式："
-  echo "1) 一键安装配置（推荐）"
-  echo "2) 修改镜像加速域名"
-  echo ""
+  # Determine operation mode
+  local run_mode=""
 
-  while true; do
-    read -rp "请输入选择 [1/2]: " mode_choice
+  if [[ -n "$MODE_ARG" ]]; then
+    # Non-interactive: mode from CLI
+    run_mode="$MODE_ARG"
+  else
+    # Interactive: ask user
+    msg select_mode
+    msg mode_install
+    msg mode_mirror
+    echo ""
 
-    if [[ "$mode_choice" == "1" ]]; then
-      echo ""
-      echo ">>> 模式：一键安装配置"
+    while true; do
+      # shellcheck disable=SC2059
+      printf "$(msg enter_choice "1/2")" ""
+      read -r mode_input
+      case "$mode_input" in
+        1) run_mode="install"; break ;;
+        2) run_mode="mirror"; break ;;
+        *) msg invalid_choice ;;
+      esac
+    done
+  fi
 
-      # 检查是否已安装 Docker
-      if command -v docker &> /dev/null; then
-        DOCKER_VERSION=$(docker --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-        echo ""
-        echo "⚠️  检测到已安装 Docker 版本: $DOCKER_VERSION"
-        echo "⚠️  继续将进行 Docker 升级或重装，建议先备份重要数据"
-        echo ""
-        echo "1) 确认继续安装/升级"
-        echo "2) 返回选择菜单"
-        echo ""
+  # ---- Mirror-only mode ----
+  if [[ "$run_mode" == "mirror" ]]; then
+    echo ""
+    msg mode_mirror_label
+    echo ""
 
-        while true; do
-          read -rp "请输入选择 [1/2]: " confirm_choice
-          if [[ "$confirm_choice" == "1" ]]; then
-            echo "✅ 用户确认继续"
-            break
-          elif [[ "$confirm_choice" == "2" ]]; then
-            echo "🔄 返回选择菜单..."
-            echo ""
-            echo "请选择操作模式："
-            echo "1) 一键安装配置（推荐）"
-            echo "2) 修改镜像加速域名"
-            echo ""
-            break
-          else
-            echo "❌ 无效选择"
-          fi
-        done
-        [[ "$confirm_choice" == "2" ]] && continue
-      fi
-      break
-
-    elif [[ "$mode_choice" == "2" ]]; then
-      echo ""
-      echo ">>> 模式：仅修改镜像加速域名"
-      echo ""
-
-      if ! command -v docker &> /dev/null; then
-        echo "❌ Docker 未安装！建议选择选项 1 进行完整安装"
-        exit 1
-      fi
-
-      ask_mirror_choice
-      configure_daemon_json "$MIRROR_CHOICE" "$CUSTOM_DOMAIN"
-
-      if systemctl is-active --quiet docker 2>/dev/null; then
-        sudo systemctl daemon-reexec 2>/dev/null || true
-        sudo systemctl restart docker 2>/dev/null || true
-        sleep 3
-        if systemctl is-active --quiet docker; then
-          echo "✅ Docker 服务重启成功，新配置已生效"
-        else
-          echo "❌ Docker 服务重启失败"
-        fi
-      else
-        echo "⚠️  Docker 服务未运行，配置将在下次启动时生效"
-      fi
-
-      echo ""
-      echo "🎉 镜像配置完成！"
-      exit 0
-    else
-      echo "❌ 无效选择，请输入 1 或 2"
+    if ! command -v docker &> /dev/null; then
+      msg docker_not_installed
+      exit 1
     fi
-  done
 
-  # ---- 全新安装/升级流程 ----
+    # Determine mirror settings
+    if [[ -n "$MIRROR_CHOICE_ARG" ]]; then
+      # Non-interactive
+      case "$MIRROR_CHOICE_ARG" in
+        none)
+          msg mirror_required
+          exit 1
+          ;;
+        public)
+          MIRROR_MODE="public"
+          CUSTOM_DOMAIN=""
+          ;;
+        *)
+          MIRROR_MODE="custom"
+          CUSTOM_DOMAIN="$MIRROR_CHOICE_ARG"
+          ;;
+      esac
+    else
+      ask_mirror_choice
+    fi
 
-  echo ">>> [1/8] 检查系统信息..."
+    configure_daemon_json "$MIRROR_MODE" "$CUSTOM_DOMAIN"
+
+    if systemctl is-active --quiet docker 2>/dev/null; then
+      sudo systemctl daemon-reexec 2>/dev/null || true
+      sudo systemctl restart docker 2>/dev/null || true
+      sleep 3
+      if systemctl is-active --quiet docker; then
+        msg service_restart_ok
+      else
+        msg service_restart_err
+      fi
+    else
+      msg service_not_running
+    fi
+
+    echo ""
+    msg mirror_config_done
+    exit 0
+  fi
+
+  # ---- Install mode ----
+  echo ""
+  msg mode_install_label
+
+  # Check if Docker is already installed
+  if command -v docker &> /dev/null; then
+    local existing_version
+    existing_version=$(docker --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    echo ""
+    msg docker_exists "$existing_version"
+    msg docker_exists_warn
+    echo ""
+
+    if [[ "$AUTO_YES" != "true" ]]; then
+      msg confirm_continue
+      msg confirm_back
+      echo ""
+
+      while true; do
+        # shellcheck disable=SC2059
+        printf "$(msg enter_choice "1/2")" ""
+        read -r confirm_input
+        case "$confirm_input" in
+          1) msg user_confirmed; break ;;
+          2) msg going_back; exec bash "$0" "$@"; exit ;;
+          *) msg invalid_choice ;;
+        esac
+      done
+    fi
+  fi
+
+  # Fetch latest versions
+  fetch_versions
+
+  # Step: Check system info
+  msg checking_system
   OS="${OVERRIDE_OS_ID:-$(awk -F= '/^ID=/{print $2}' /etc/os-release | tr -d '"')}"
   ARCH=$(uname -m)
   VERSION_ID="${OVERRIDE_OS_VERSION_ID:-$(awk -F= '/^VERSION_ID=/{print $2}' /etc/os-release | tr -d '"')}"
-  echo "系统: $OS $VERSION_ID 架构: $ARCH"
+  msg system_info "$OS" "$VERSION_ID" "$ARCH"
 
-  # 映射架构
+  # Map architecture
   case "$ARCH" in
     x86_64)             DOCKER_ARCH="x86_64" ;;
     aarch64|arm64)      DOCKER_ARCH="aarch64" ;;
@@ -1036,13 +1429,13 @@ main() {
     ppc64le)            DOCKER_ARCH="ppc64le" ;;
     *)                  DOCKER_ARCH="$ARCH" ;;
   esac
-  echo "📦 Docker 架构: $DOCKER_ARCH"
+  msg docker_arch "$DOCKER_ARCH"
 
-  # 检测安装策略
+  # Detect install strategy
   detect_install_strategy
 
-  # ---- 安装 Docker ----
-  echo ">>> [2/8] 配置 Docker 源..."
+  # Configure Docker source
+  msg configuring_source
 
   case "$INSTALL_TYPE" in
     rpm)
@@ -1059,27 +1452,50 @@ main() {
       ;;
   esac
 
-  # 启动 Docker
+  # Start Docker
   start_docker_service
 
-  # 安装 Docker Compose
+  # Install Docker Compose
   install_docker_compose
 
-  # 配置镜像加速
-  ask_mirror_choice
-  configure_daemon_json "$MIRROR_CHOICE" "$CUSTOM_DOMAIN"
+  # Mirror configuration
+  if [[ -n "$MIRROR_CHOICE_ARG" ]]; then
+    # Non-interactive mirror config
+    case "$MIRROR_CHOICE_ARG" in
+      none|"")
+        MIRROR_MODE="none"
+        CUSTOM_DOMAIN=""
+        ;;
+      public)
+        MIRROR_MODE="public"
+        CUSTOM_DOMAIN=""
+        ;;
+      *)
+        MIRROR_MODE="custom"
+        CUSTOM_DOMAIN="$MIRROR_CHOICE_ARG"
+        ;;
+    esac
+  elif [[ "$AUTO_YES" == "true" ]]; then
+    # Auto-yes with no mirror arg = no mirror
+    MIRROR_MODE="none"
+    CUSTOM_DOMAIN=""
+  else
+    ask_mirror_choice
+  fi
 
-  # 重启 Docker 使配置生效
-  restart_docker
+  if [[ "$MIRROR_MODE" != "none" ]]; then
+    configure_daemon_json "$MIRROR_MODE" "$CUSTOM_DOMAIN"
+    restart_docker
+  fi
 
-  # 配置用户权限
+  # Configure user permissions
   setup_user_group
 
   echo ""
-  echo "🎉 安装和配置完成！"
-  echo "Docker 版本: $(docker --version 2>/dev/null || echo '未知')"
-  echo "官方网站: https://docs.docker.com"
+  msg install_done
+  msg docker_version_info "$(docker --version 2>/dev/null || echo 'unknown')"
+  msg official_site
 }
 
-# 执行主流程
+# Run main
 main "$@"
