@@ -348,7 +348,7 @@ install_docker_rpm() {
   set -e
 
   # 检查核心组件
-  if command -v docker &>/dev/null && ([ -f /usr/lib/systemd/system/docker.service ] || [ -f /etc/systemd/system/docker.service ]); then
+  if command -v docker &>/dev/null && { [ -f /usr/lib/systemd/system/docker.service ] || [ -f /etc/systemd/system/docker.service ]; }; then
     echo "✅ Docker CE 核心组件安装完成"
     return 0
   fi
@@ -533,11 +533,13 @@ start_docker_service() {
 
   sudo systemctl daemon-reload 2>/dev/null || true
   sudo systemctl enable docker 2>/dev/null && echo "✅ Docker 已设为开机自启" || echo "⚠️  开机自启设置失败"
-  sudo systemctl start docker 2>/dev/null && echo "✅ Docker 服务启动成功" || {
+  if sudo systemctl start docker 2>/dev/null; then
+    echo "✅ Docker 服务启动成功"
+  else
     echo "⚠️  Docker 服务启动失败，尝试查看日志..."
     sudo systemctl status docker --no-pager -l 2>/dev/null || true
     echo "💡 可尝试手动启动: sudo dockerd &"
-  }
+  fi
 }
 
 # ============================================================
@@ -558,7 +560,8 @@ configure_daemon_json() {
   fi
 
   # 清理用户输入的域名
-  custom_domain=$(echo "$custom_domain" | sed 's|^https\?://||')
+  custom_domain="${custom_domain#http://}"
+  custom_domain="${custom_domain#https://}"
 
   # 构建 mirror_list
   local mirror_list insecure_registries
@@ -614,7 +617,7 @@ ask_mirror_choice() {
   echo "2) 使用自定义加速域名 (自定义 + docker.m.daocloud.io)"
 
   while true; do
-    read -p "请输入选择 [1/2]: " MIRROR_CHOICE
+    read -rp "请输入选择 [1/2]: " MIRROR_CHOICE
     if [[ "$MIRROR_CHOICE" == "1" || "$MIRROR_CHOICE" == "2" ]]; then
       break
     fi
@@ -623,7 +626,7 @@ ask_mirror_choice() {
 
   CUSTOM_DOMAIN=""
   if [[ "$MIRROR_CHOICE" == "2" ]]; then
-    read -p "请输入您的自定义镜像加速域名: " CUSTOM_DOMAIN
+    read -rp "请输入您的自定义镜像加速域名: " CUSTOM_DOMAIN
   fi
 }
 
@@ -652,7 +655,7 @@ setup_user_group() {
     local target_user="$1"
     if ! groups "$target_user" 2>/dev/null | grep -q "\bdocker\b"; then
       echo "⚠️  将用户 $target_user 加入 docker 组意味着赋予该用户 root 级权限。"
-      read -p "是否继续将 $target_user 添加到 docker 组？[Y/n] " confirm
+      read -rp "是否继续将 $target_user 添加到 docker 组？[Y/n] " confirm
       confirm=${confirm:-Y}
       if [[ "$confirm" =~ ^[Yy]$ ]]; then
         sudo usermod -aG docker "$target_user" 2>/dev/null || true
@@ -943,7 +946,7 @@ main() {
   echo ""
 
   while true; do
-    read -p "请输入选择 [1/2]: " mode_choice
+    read -rp "请输入选择 [1/2]: " mode_choice
 
     if [[ "$mode_choice" == "1" ]]; then
       echo ""
@@ -961,7 +964,7 @@ main() {
         echo ""
 
         while true; do
-          read -p "请输入选择 [1/2]: " confirm_choice
+          read -rp "请输入选择 [1/2]: " confirm_choice
           if [[ "$confirm_choice" == "1" ]]; then
             echo "✅ 用户确认继续"
             break
