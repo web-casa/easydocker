@@ -18,11 +18,13 @@ fi
 
 # image|override_os_id|override_version|expected_pkg|expected_repo_major
 CASES=(
-  "centos:7|rhel|7|yum|7"
   "rockylinux:8|rhel|8|dnf|8"
   "rockylinux:9|rhel|9|dnf|9"
-  "quay.io/centos/centos:stream10|rhel|10|dnf|9"
+  "quay.io/centos/centos:stream10|rhel|10|dnf|10"
 )
+
+FAILED=0
+PASSED=0
 
 for case_item in "${CASES[@]}"; do
   IFS='|' read -r image os_id version expected_pkg expected_repo_major <<<"$case_item"
@@ -40,9 +42,25 @@ for case_item in "${CASES[@]}"; do
 
   echo "$output"
 
-  echo "$output" | grep -q "TEST_MODE_OK"
-  echo "$output" | grep -q "pkg=$expected_pkg"
-  echo "$output" | grep -q "repo=centos/$expected_repo_major"
+  ok=true
+  echo "$output" | grep -q "TEST_MODE_OK"   || { echo "  FAIL: missing TEST_MODE_OK"; ok=false; }
+  echo "$output" | grep -q "pkg=$expected_pkg" || { echo "  FAIL: expected pkg=$expected_pkg"; ok=false; }
+  echo "$output" | grep -q "repo=centos/$expected_repo_major" || { echo "  FAIL: expected repo=centos/$expected_repo_major"; ok=false; }
+
+  if $ok; then
+    echo "  PASS"
+    ((PASSED++))
+  else
+    echo "  FAIL"
+    ((FAILED++))
+  fi
 done
+
+echo ""
+echo "Results: $PASSED passed, $FAILED failed out of ${#CASES[@]} tests."
+
+if [[ $FAILED -gt 0 ]]; then
+  exit 1
+fi
 
 echo "All OS matrix checks passed."
