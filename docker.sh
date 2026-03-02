@@ -104,6 +104,7 @@ init_messages_en() {
     [docker_arch]="Docker arch: %s"
     [configuring_source]="Configuring Docker source..."
     [install_done]="Installation and configuration complete!"
+    [install_done_warning]="Installation complete, but Docker service failed to start. Please check the logs above."
     [docker_version_info]="Docker version: %s"
     [detected_os]="Detected %s %s, using %s repository"
     [unsupported_os]="Unsupported: %s %s"
@@ -222,6 +223,7 @@ init_messages_zh() {
     [docker_arch]="Docker 架构: %s"
     [configuring_source]="配置 Docker 源..."
     [install_done]="安装和配置完成！"
+    [install_done_warning]="安装完成，但 Docker 服务启动失败，请检查上方日志。"
     [docker_version_info]="Docker 版本: %s"
     [detected_os]="检测到 %s %s，使用 %s 仓库"
     [unsupported_os]="暂不支持该系统: %s %s"
@@ -326,8 +328,8 @@ get_latest_version() {
   local version
   version=$(curl -fsSL --connect-timeout 5 --max-time 10 \
     "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
-    | grep '"tag_name"' | head -1 | sed 's/.*"v\?\([^"]*\)".*/\1/')
-  if [[ -n "$version" && "$version" != "null" ]]; then
+    | grep '"tag_name"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  if [[ -n "$version" ]]; then
     echo "$version"
   else
     echo "$default"
@@ -850,6 +852,16 @@ start_docker_service() {
   fi
 
   sudo systemctl daemon-reload 2>/dev/null || true
+
+  # Ensure containerd is started first (required by Docker)
+  if systemctl list-unit-files containerd.service &>/dev/null; then
+    sudo systemctl enable containerd 2>/dev/null || true
+    if ! systemctl is-active --quiet containerd 2>/dev/null; then
+      sudo systemctl start containerd 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+
   if sudo systemctl enable docker 2>/dev/null; then
     msg autostart_ok
   else
@@ -857,10 +869,13 @@ start_docker_service() {
   fi
   if sudo systemctl start docker 2>/dev/null; then
     msg service_started
+    DOCKER_RUNNING=true
   else
     msg service_start_failed
-    sudo systemctl status docker --no-pager -l 2>/dev/null || true
+    sudo journalctl -xeu docker.service --no-pager -n 20 2>/dev/null || \
+      sudo systemctl status docker --no-pager -l 2>/dev/null || true
     msg service_start_tip
+    DOCKER_RUNNING=false
   fi
 }
 
@@ -990,9 +1005,10 @@ restart_docker() {
 
   if systemctl is-active --quiet docker 2>/dev/null; then
     msg service_restarted
+    DOCKER_RUNNING=true
   else
     msg service_restart_failed
-    exit 1
+    DOCKER_RUNNING=false
   fi
 }
 
@@ -1492,8 +1508,12 @@ main() {
   setup_user_group
 
   echo ""
-  msg install_done
-  msg docker_version_info "$(docker --version 2>/dev/null || echo 'unknown')"
+  if [[ "${DOCKER_RUNNING:-false}" == "true" ]]; then
+    msg install_done
+    msg docker_version_info "$(docker --version 2>/dev/null || echo 'unknown')"
+  else
+    msg install_done_warning
+  fi
   msg official_site
 }
 
