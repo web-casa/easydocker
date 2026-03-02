@@ -3,11 +3,18 @@
 # 支持官方未覆盖的 Linux 发行版（openEuler、Kylin、Anolis、OpenCloudOS 等）
 set -e
 
-# ============================================================
-# 常量
-# ============================================================
-DOCKER_BINARY_VERSION="29.2.1"
-DOCKER_COMPOSE_V2_VERSION="2.36.0"
+get_latest_version() {
+  local repo="$1" default="$2"
+  local version
+  version=$(curl -fsSL --connect-timeout 5 --max-time 10 \
+    "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null \
+    | grep '"tag_name"' | head -1 | sed 's/.*"v\?\([^"]*\)".*/\1/')
+  if [[ -n "$version" && "$version" != "null" ]]; then
+    echo "$version"
+  else
+    echo "$default"
+  fi
+}
 
 MIRROR_LIST=(
   "https://mirrors.aliyun.com/docker-ce"
@@ -44,35 +51,132 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
   OS="${OVERRIDE_OS_ID:-$(awk -F= '/^ID=/{print $2}' /etc/os-release | tr -d '"')}"
   VERSION_ID="${OVERRIDE_OS_VERSION_ID:-$(awk -F= '/^VERSION_ID=/{print $2}' /etc/os-release | tr -d '"')}"
   VERSION_MAJOR="${VERSION_ID%%.*}"
+  CODENAME="${OVERRIDE_CODENAME:-$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release 2>/dev/null | tr -d '"')}"
   PKG_MANAGER=""
+  REPO_PATH=""
 
   case "$OS" in
+    # ---- RPM 系（CentOS 兼容仓库）----
     centos|rhel|rocky|almalinux|ol)
       case "$VERSION_MAJOR" in
-        8|9) PKG_MANAGER="dnf" ;;
-        10)  PKG_MANAGER="dnf" ;;
+        8|9|10) PKG_MANAGER="dnf" ;;
         *)
           echo "UNSUPPORTED: $OS $VERSION_ID (仅支持 8/9/10)"
           exit 1
           ;;
       esac
+      if [[ "$VERSION_MAJOR" -ge 10 ]]; then
+        REPO_PATH="centos/10"
+      else
+        REPO_PATH="centos/$VERSION_MAJOR"
+      fi
       ;;
+
+    openeuler)
+      PKG_MANAGER="dnf"
+      if [[ "$VERSION_MAJOR" -ge 22 ]]; then
+        REPO_PATH="centos/9"
+      elif [[ "$VERSION_MAJOR" -ge 20 ]]; then
+        REPO_PATH="centos/8"
+      else
+        echo "UNSUPPORTED: openEuler $VERSION_ID (仅支持 20+)"
+        exit 1
+      fi
+      ;;
+
+    opencloudos)
+      PKG_MANAGER="dnf"
+      REPO_PATH="centos/9"
+      ;;
+
+    anolis)
+      if [[ "$VERSION_MAJOR" -ge 23 ]]; then
+        PKG_MANAGER="dnf"
+        REPO_PATH="centos/9"
+      elif [[ "$VERSION_MAJOR" -ge 8 ]]; then
+        PKG_MANAGER="dnf"
+        REPO_PATH="centos/8"
+      else
+        echo "UNSUPPORTED: Anolis $VERSION_ID (仅支持 8+)"
+        exit 1
+      fi
+      ;;
+
+    alinux)
+      if [[ "$VERSION_MAJOR" -ge 3 ]]; then
+        PKG_MANAGER="dnf"
+      else
+        PKG_MANAGER="yum"
+      fi
+      REPO_PATH="centos/8"
+      ;;
+
+    kylin)
+      PKG_MANAGER="dnf"
+      REPO_PATH="centos/8"
+      ;;
+
+    # ---- Fedora ----
+    fedora)
+      PKG_MANAGER="dnf"
+      REPO_PATH="fedora/$VERSION_ID"
+      ;;
+
+    # ---- Debian 系 ----
+    ubuntu)
+      PKG_MANAGER="apt-get"
+      case "$VERSION_ID" in
+        24.04) CODENAME="noble" ;;
+        22.04) CODENAME="jammy" ;;
+        20.04) CODENAME="focal" ;;
+        18.04) CODENAME="bionic" ;;
+      esac
+      if [[ -z "$CODENAME" ]]; then
+        echo "UNSUPPORTED: Ubuntu $VERSION_ID (无法确定代号)"
+        exit 1
+      fi
+      REPO_PATH="ubuntu/$CODENAME"
+      ;;
+
+    debian)
+      PKG_MANAGER="apt-get"
+      case "$VERSION_ID" in
+        13) CODENAME="trixie" ;;
+        12) CODENAME="bookworm" ;;
+        11) CODENAME="bullseye" ;;
+      esac
+      if [[ -z "$CODENAME" ]]; then
+        echo "UNSUPPORTED: Debian $VERSION_ID (无法确定代号)"
+        exit 1
+      fi
+      REPO_PATH="debian/$CODENAME"
+      ;;
+
+    kali)
+      PKG_MANAGER="apt-get"
+      if [[ -z "$CODENAME" ]]; then
+        CODENAME="bookworm"
+      fi
+      REPO_PATH="debian/$CODENAME"
+      ;;
+
     *)
       echo "UNSUPPORTED: $OS $VERSION_ID"
       exit 1
       ;;
   esac
 
-  # RHEL 10+ 使用 el10 官方仓库
-  if [[ "$VERSION_MAJOR" -ge 10 ]]; then
-    REPO_MAJOR="10"
-  else
-    REPO_MAJOR="$VERSION_MAJOR"
-  fi
-
-  echo "TEST_MODE_OK os=$OS version=$VERSION_ID major=$VERSION_MAJOR pkg=$PKG_MANAGER repo=centos/$REPO_MAJOR"
+  echo "TEST_MODE_OK os=$OS version=$VERSION_ID major=$VERSION_MAJOR pkg=$PKG_MANAGER repo=$REPO_PATH"
   exit 0
 fi
+
+# ============================================================
+# 版本号（自动获取最新版，API 不可用时使用默认值）
+# ============================================================
+echo "正在获取最新版本号..."
+DOCKER_BINARY_VERSION=$(get_latest_version "moby/moby" "29.2.1")
+DOCKER_COMPOSE_V2_VERSION=$(get_latest_version "docker/compose" "2.36.0")
+echo "  Docker: ${DOCKER_BINARY_VERSION}  |  Compose: ${DOCKER_COMPOSE_V2_VERSION}"
 
 # ============================================================
 # 镜像源管理
@@ -701,7 +805,10 @@ detect_install_strategy() {
 
     anolis)
       INSTALL_TYPE="rpm"
-      if [[ "${VERSION_ID%%.*}" -ge 8 ]]; then
+      if [[ "${VERSION_ID%%.*}" -ge 23 ]]; then
+        CENTOS_VERSION="9"
+        PKG_MANAGER="dnf"
+      elif [[ "${VERSION_ID%%.*}" -ge 8 ]]; then
         CENTOS_VERSION="8"
         PKG_MANAGER="dnf"
       else

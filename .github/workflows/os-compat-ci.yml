@@ -8,9 +8,243 @@ on:
       - master
 
 jobs:
-  docker-os-matrix:
+  # ============================================================
+  # Job 1: ShellCheck 静态分析
+  # ============================================================
+  shellcheck:
+    name: ShellCheck Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+
+      - name: Lint docker.sh
+        run: shellcheck -x -s bash docker.sh
+
+      - name: Lint tests/run_os_matrix.sh
+        run: shellcheck -x -s bash tests/run_os_matrix.sh
+
+  # ============================================================
+  # Job 2: RPM 系发行版矩阵
+  # ============================================================
+  rpm-matrix:
+    name: "RPM: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: "rockylinux:8"
+            os_id: rhel
+            version: "8"
+            expected_pkg: dnf
+            expected_repo: "centos/8"
+          - image: "rockylinux:9"
+            os_id: rhel
+            version: "9"
+            expected_pkg: dnf
+            expected_repo: "centos/9"
+          - image: "quay.io/centos/centos:stream10"
+            os_id: rhel
+            version: "10"
+            expected_pkg: dnf
+            expected_repo: "centos/10"
+          - image: "almalinux:8"
+            os_id: rhel
+            version: "8"
+            expected_pkg: dnf
+            expected_repo: "centos/8"
+          - image: "almalinux:9"
+            os_id: rhel
+            version: "9"
+            expected_pkg: dnf
+            expected_repo: "centos/9"
+          - image: "oraclelinux:8"
+            os_id: ol
+            version: "8"
+            expected_pkg: dnf
+            expected_repo: "centos/8"
+          - image: "oraclelinux:9"
+            os_id: ol
+            version: "9"
+            expected_pkg: dnf
+            expected_repo: "centos/9"
+          - image: "openanolis/anolisos:23"
+            os_id: anolis
+            version: "23"
+            expected_pkg: dnf
+            expected_repo: "centos/9"
+          - image: "opencloudos/opencloudos9-minimal"
+            os_id: opencloudos
+            version: "9.4"
+            expected_pkg: dnf
+            expected_repo: "centos/9"
+          - image: "openeuler/openeuler:24.03-lts"
+            os_id: openeuler
+            version: "24.03"
+            expected_pkg: dnf
+            expected_repo: "centos/9"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull image
+        run: docker pull "${{ matrix.image }}"
+
+      - name: Run TEST_MODE
+        run: |
+          output=$(docker run --rm \
+            -e TEST_MODE=1 \
+            -e OVERRIDE_OS_ID="${{ matrix.os_id }}" \
+            -e OVERRIDE_OS_VERSION_ID="${{ matrix.version }}" \
+            -v "$PWD/docker.sh:/tmp/docker.sh:ro" \
+            "${{ matrix.image }}" \
+            bash /tmp/docker.sh)
+          echo "$output"
+          echo "$output" | grep -q "TEST_MODE_OK"
+          echo "$output" | grep -q "pkg=${{ matrix.expected_pkg }}"
+          echo "$output" | grep -q "repo=${{ matrix.expected_repo }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### ${{ matrix.image }} (${{ matrix.os_id }} ${{ matrix.version }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected pkg: \`${{ matrix.expected_pkg }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected repo: \`${{ matrix.expected_repo }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # Job 3: Debian/Ubuntu 系发行版矩阵
+  # ============================================================
+  deb-matrix:
+    name: "DEB: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: "ubuntu:24.04"
+            os_id: ubuntu
+            version: "24.04"
+            expected_pkg: apt-get
+            expected_repo: "ubuntu/noble"
+          - image: "ubuntu:22.04"
+            os_id: ubuntu
+            version: "22.04"
+            expected_pkg: apt-get
+            expected_repo: "ubuntu/jammy"
+          - image: "ubuntu:20.04"
+            os_id: ubuntu
+            version: "20.04"
+            expected_pkg: apt-get
+            expected_repo: "ubuntu/focal"
+          - image: "debian:12"
+            os_id: debian
+            version: "12"
+            expected_pkg: apt-get
+            expected_repo: "debian/bookworm"
+          - image: "debian:11"
+            os_id: debian
+            version: "11"
+            expected_pkg: apt-get
+            expected_repo: "debian/bullseye"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull image
+        run: docker pull "${{ matrix.image }}"
+
+      - name: Run TEST_MODE
+        run: |
+          output=$(docker run --rm \
+            -e TEST_MODE=1 \
+            -e OVERRIDE_OS_ID="${{ matrix.os_id }}" \
+            -e OVERRIDE_OS_VERSION_ID="${{ matrix.version }}" \
+            -v "$PWD/docker.sh:/tmp/docker.sh:ro" \
+            "${{ matrix.image }}" \
+            bash /tmp/docker.sh)
+          echo "$output"
+          echo "$output" | grep -q "TEST_MODE_OK"
+          echo "$output" | grep -q "pkg=${{ matrix.expected_pkg }}"
+          echo "$output" | grep -q "repo=${{ matrix.expected_repo }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### ${{ matrix.image }} (${{ matrix.os_id }} ${{ matrix.version }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected pkg: \`${{ matrix.expected_pkg }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected repo: \`${{ matrix.expected_repo }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # Job 4: Fedora 矩阵
+  # ============================================================
+  fedora-matrix:
+    name: "Fedora: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: "fedora:41"
+            os_id: fedora
+            version: "41"
+            expected_pkg: dnf
+            expected_repo: "fedora/41"
+          - image: "fedora:40"
+            os_id: fedora
+            version: "40"
+            expected_pkg: dnf
+            expected_repo: "fedora/40"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull image
+        run: docker pull "${{ matrix.image }}"
+
+      - name: Run TEST_MODE
+        run: |
+          output=$(docker run --rm \
+            -e TEST_MODE=1 \
+            -e OVERRIDE_OS_ID="${{ matrix.os_id }}" \
+            -e OVERRIDE_OS_VERSION_ID="${{ matrix.version }}" \
+            -v "$PWD/docker.sh:/tmp/docker.sh:ro" \
+            "${{ matrix.image }}" \
+            bash /tmp/docker.sh)
+          echo "$output"
+          echo "$output" | grep -q "TEST_MODE_OK"
+          echo "$output" | grep -q "pkg=${{ matrix.expected_pkg }}"
+          echo "$output" | grep -q "repo=${{ matrix.expected_repo }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### ${{ matrix.image }} (${{ matrix.os_id }} ${{ matrix.version }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected pkg: \`${{ matrix.expected_pkg }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected repo: \`${{ matrix.expected_repo }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # Job 5: 完整矩阵测试（本地脚本）
+  # ============================================================
+  full-matrix-script:
+    name: Full Matrix (Script)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: [shellcheck]
 
     steps:
       - name: Checkout
