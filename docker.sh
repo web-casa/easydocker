@@ -55,8 +55,11 @@ init_messages_en() {
     [service_started]="Docker service started"
     [service_start_failed]="Docker service failed to start, checking logs..."
     [service_start_tip]="Tip: Try starting manually with: sudo dockerd &"
-    [kernel_reboot_hint]="A newer kernel (%s) is installed but not running (current: %s). Reboot to load the new kernel and its modules, then Docker should start normally."
-    [reboot_command]="Run: reboot"
+    [kernel_reboot_hint]="A newer kernel (%s) is installed but not running (current: %s). A reboot is REQUIRED to load the new kernel and its modules."
+    [reboot_prompt]="Docker is set to start on boot. Reboot now to complete setup?"
+    [reboot_confirm]="1) Reboot now (recommended)"
+    [reboot_skip]="2) Skip (Docker won't work until reboot)"
+    [rebooting]="Rebooting..."
     [removing_conflicts]="Removing conflicting packages (podman, buildah, etc.)..."
     [conflicts_removed]="Conflicting packages removed"
     [installing_kernel_modules]="Installing kernel-modules-extra (required for Docker networking on EL10+)..."
@@ -93,7 +96,7 @@ init_messages_en() {
     [group_root]="Running as root, no need to add to docker group"
     [no_sudo]="sudo not found, running commands directly as root"
     [select_mode]="Select operation mode:"
-    [mode_install]="1) Install and configure (recommended)"
+    [mode_install]="1) Install and configure (Default)"
     [mode_mirror]="2) Change mirror acceleration only"
     [mode_install_label]="Mode: Install and configure"
     [mode_mirror_label]="Mode: Change mirror acceleration"
@@ -183,8 +186,11 @@ init_messages_zh() {
     [service_started]="Docker 服务启动成功"
     [service_start_failed]="Docker 服务启动失败，尝试查看日志..."
     [service_start_tip]="可尝试手动启动: sudo dockerd &"
-    [kernel_reboot_hint]="检测到已安装新内核 (%s) 但当前运行的是旧内核 (%s)。请重启服务器以加载新内核及其模块，之后 Docker 应可正常启动。"
-    [reboot_command]="执行: reboot"
+    [kernel_reboot_hint]="检测到已安装新内核 (%s) 但当前运行的是旧内核 (%s)。必须重启才能加载新内核及其模块。"
+    [reboot_prompt]="Docker 已设为开机自启。是否立即重启以完成安装？"
+    [reboot_confirm]="1) 立即重启（推荐）"
+    [reboot_skip]="2) 稍后手动重启（重启前 Docker 无法使用）"
+    [rebooting]="正在重启..."
     [removing_conflicts]="正在移除冲突的软件包 (podman, buildah 等)..."
     [conflicts_removed]="冲突软件包已移除"
     [installing_kernel_modules]="正在安装 kernel-modules-extra（EL10+ Docker 网络所需）..."
@@ -221,7 +227,7 @@ init_messages_zh() {
     [group_root]="当前以 root 用户执行，无需添加到 docker 组"
     [no_sudo]="未检测到 sudo 命令，将直接使用 root 权限执行命令"
     [select_mode]="请选择操作模式："
-    [mode_install]="1) 一键安装配置（推荐）"
+    [mode_install]="1) 一键安装配置（默认）"
     [mode_mirror]="2) 修改镜像加速域名"
     [mode_install_label]="模式：一键安装配置"
     [mode_mirror_label]="模式：仅修改镜像加速域名"
@@ -378,6 +384,7 @@ setup_sudo() {
 
 # Check if a newer kernel is installed but not yet running
 # If so, a reboot is likely needed for Docker to work (missing kernel modules)
+# Sets KERNEL_REBOOT_NEEDED=true if reboot is required
 check_kernel_reboot_needed() {
   local running_kernel newest_kernel
   running_kernel=$(uname -r)
@@ -392,8 +399,8 @@ check_kernel_reboot_needed() {
   if [[ -n "$newest_kernel" && "$newest_kernel" != "$running_kernel" ]]; then
     echo ""
     msg kernel_reboot_hint "$newest_kernel" "$running_kernel"
-    msg reboot_command
     echo ""
+    KERNEL_REBOOT_NEEDED=true
   fi
 }
 
@@ -1643,6 +1650,30 @@ main() {
     msg docker_version_info "$(docker --version 2>/dev/null || echo 'unknown')"
   else
     msg install_done_warning
+    # If a kernel reboot is needed, offer to reboot
+    if [[ "${KERNEL_REBOOT_NEEDED:-false}" == "true" ]]; then
+      echo ""
+      msg reboot_prompt
+      msg reboot_confirm
+      msg reboot_skip
+      echo ""
+      if [[ "$AUTO_YES" == "true" ]]; then
+        msg rebooting
+        reboot
+      else
+        while true; do
+          # shellcheck disable=SC2059
+          printf "$(msg enter_choice "1/2")" ""
+          read -r reboot_input
+          reboot_input="${reboot_input:-1}"
+          case "$reboot_input" in
+            1) msg rebooting; reboot ;;
+            2) break ;;
+            *) msg invalid_choice ;;
+          esac
+        done
+      fi
+    fi
   fi
   msg official_site
 }
