@@ -710,10 +710,16 @@ prepare_kernel_modules() {
     return 0
   fi
 
-  # Install kernel-modules-extra if not present
-  if ! rpm -q kernel-modules-extra &>/dev/null 2>&1; then
+  # Install kernel-modules-extra for the RUNNING kernel first,
+  # so modules can be loaded without a reboot.
+  local running_kernel
+  running_kernel=$(uname -r)
+  if ! rpm -q "kernel-modules-extra-${running_kernel}" &>/dev/null 2>&1; then
     msg installing_kernel_modules
-    sudo "$pkg_mgr" install -y kernel-modules-extra 2>/dev/null || true
+    # Try current kernel version first; fall back to generic (latest) if unavailable
+    if ! sudo "$pkg_mgr" install -y "kernel-modules-extra-${running_kernel}" 2>/dev/null; then
+      sudo "$pkg_mgr" install -y kernel-modules-extra 2>/dev/null || true
+    fi
     msg kernel_modules_installed
   fi
 
