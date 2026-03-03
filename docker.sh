@@ -55,6 +55,15 @@ init_messages_en() {
     [service_started]="Docker service started"
     [service_start_failed]="Docker service failed to start, checking logs..."
     [service_start_tip]="Tip: Try starting manually with: sudo dockerd &"
+    [kernel_reboot_hint]="A newer kernel (%s) is installed but not running (current: %s). Reboot to load the new kernel and its modules, then Docker should start normally."
+    [reboot_command]="Run: reboot"
+    [removing_conflicts]="Removing conflicting packages (podman, buildah, etc.)..."
+    [conflicts_removed]="Conflicting packages removed"
+    [installing_kernel_modules]="Installing kernel-modules-extra (required for Docker networking on EL10+)..."
+    [kernel_modules_installed]="kernel-modules-extra installed"
+    [loading_kernel_modules]="Loading required kernel modules..."
+    [kernel_modules_loaded]="Kernel modules loaded and persisted"
+    [kernel_modules_load_failed]="Failed to load kernel modules (may need reboot for new kernel)"
     [configuring_mirror]="Configuring mirror acceleration..."
     [backup_ok]="Existing config backed up"
     [no_dns_added]="No DNS configured, added Docker DNS automatically"
@@ -174,6 +183,15 @@ init_messages_zh() {
     [service_started]="Docker 服务启动成功"
     [service_start_failed]="Docker 服务启动失败，尝试查看日志..."
     [service_start_tip]="可尝试手动启动: sudo dockerd &"
+    [kernel_reboot_hint]="检测到已安装新内核 (%s) 但当前运行的是旧内核 (%s)。请重启服务器以加载新内核及其模块，之后 Docker 应可正常启动。"
+    [reboot_command]="执行: reboot"
+    [removing_conflicts]="正在移除冲突的软件包 (podman, buildah 等)..."
+    [conflicts_removed]="冲突软件包已移除"
+    [installing_kernel_modules]="正在安装 kernel-modules-extra（EL10+ Docker 网络所需）..."
+    [kernel_modules_installed]="kernel-modules-extra 已安装"
+    [loading_kernel_modules]="正在加载所需内核模块..."
+    [kernel_modules_loaded]="内核模块已加载并持久化"
+    [kernel_modules_load_failed]="内核模块加载失败（可能需要重启以使用新内核）"
     [configuring_mirror]="配置镜像加速..."
     [backup_ok]="已备份现有配置"
     [no_dns_added]="系统未配置 DNS，已自动添加 Docker DNS"
@@ -358,6 +376,27 @@ setup_sudo() {
   fi
 }
 
+# Check if a newer kernel is installed but not yet running
+# If so, a reboot is likely needed for Docker to work (missing kernel modules)
+check_kernel_reboot_needed() {
+  local running_kernel newest_kernel
+  running_kernel=$(uname -r)
+
+  # Get list of installed kernels sorted by version, pick the newest
+  if command -v rpm &>/dev/null; then
+    newest_kernel=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null | sort -V | tail -1)
+  elif command -v dpkg &>/dev/null; then
+    newest_kernel=$(dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/{print $2}' | sed 's/linux-image-//' | sort -V | tail -1)
+  fi
+
+  if [[ -n "$newest_kernel" && "$newest_kernel" != "$running_kernel" ]]; then
+    echo ""
+    msg kernel_reboot_hint "$newest_kernel" "$running_kernel"
+    msg reboot_command
+    echo ""
+  fi
+}
+
 # Clean up temp files on exit
 cleanup() {
   rm -f /tmp/docker.tgz /tmp/docker-ce-install.log /tmp/docker-ce-install-retry.log /tmp/docker-ce-install-mirror.log 2>/dev/null || true
@@ -423,12 +462,16 @@ if [[ "${TEST_MODE:-0}" == "1" ]]; then
       ;;
 
     alinux)
-      if [[ "$VERSION_MAJOR" -ge 3 ]]; then
+      if [[ "$VERSION_MAJOR" -ge 4 ]]; then
         PKG_MANAGER="dnf"
+        REPO_PATH="centos/9"
+      elif [[ "$VERSION_MAJOR" -ge 3 ]]; then
+        PKG_MANAGER="dnf"
+        REPO_PATH="centos/8"
       else
         PKG_MANAGER="yum"
+        REPO_PATH="centos/8"
       fi
-      REPO_PATH="centos/8"
       ;;
 
     kylin)
@@ -627,6 +670,71 @@ setup_deb_repo() {
 
   msg apt_source_all_failed
   return 1
+}
+
+# ============================================================
+# Pre-install preparation
+# ============================================================
+
+# Remove conflicting packages (Podman, Buildah, etc.)
+# Required on EL systems where these are pre-installed
+remove_conflicting_packages() {
+  local pkg_mgr="$1"
+  local conflicts=(podman buildah containers-common docker docker-client
+    docker-client-latest docker-common docker-latest docker-latest-logrotate
+    docker-logrotate docker-engine)
+  local found=false
+
+  for pkg in "${conflicts[@]}"; do
+    if rpm -q "$pkg" &>/dev/null 2>&1; then
+      found=true
+      break
+    fi
+  done
+
+  if [[ "$found" == "true" ]]; then
+    msg removing_conflicts
+    sudo "$pkg_mgr" remove -y "${conflicts[@]}" 2>/dev/null || true
+    msg conflicts_removed
+  fi
+}
+
+# Ensure required kernel modules are available on EL10+
+# EL10 removed ip_tables module; Docker needs xt_addrtype, br_netfilter, overlay
+prepare_kernel_modules() {
+  local pkg_mgr="$1"
+  local version_major="$2"
+
+  # Only needed for EL10+
+  if [[ "$version_major" -lt 10 ]]; then
+    return 0
+  fi
+
+  # Install kernel-modules-extra if not present
+  if ! rpm -q kernel-modules-extra &>/dev/null 2>&1; then
+    msg installing_kernel_modules
+    sudo "$pkg_mgr" install -y kernel-modules-extra 2>/dev/null || true
+    msg kernel_modules_installed
+  fi
+
+  # Load required kernel modules
+  msg loading_kernel_modules
+  local all_loaded=true
+  for mod in xt_addrtype br_netfilter overlay; do
+    if ! modprobe "$mod" 2>/dev/null; then
+      all_loaded=false
+    fi
+  done
+
+  if [[ "$all_loaded" == "true" ]]; then
+    # Persist across reboots
+    for mod in xt_addrtype br_netfilter overlay; do
+      echo "$mod" | sudo tee "/etc/modules-load.d/${mod}.conf" > /dev/null 2>/dev/null || true
+    done
+    msg kernel_modules_loaded
+  else
+    msg kernel_modules_load_failed
+  fi
 }
 
 # ============================================================
@@ -874,6 +982,10 @@ start_docker_service() {
     msg service_start_failed
     sudo journalctl -xeu docker.service --no-pager -n 20 2>/dev/null || \
       sudo systemctl status docker --no-pager -l 2>/dev/null || true
+
+    # Check if a newer kernel is installed but not yet booted
+    check_kernel_reboot_needed
+
     msg service_start_tip
     DOCKER_RUNNING=false
   fi
@@ -1193,7 +1305,10 @@ detect_install_strategy() {
 
     alinux)
       INSTALL_TYPE="rpm"
-      if [[ "${VERSION_ID%%.*}" -ge 3 ]]; then
+      if [[ "${VERSION_ID%%.*}" -ge 4 ]]; then
+        CENTOS_VERSION="9"
+        PKG_MANAGER="dnf"
+      elif [[ "${VERSION_ID%%.*}" -ge 3 ]]; then
         CENTOS_VERSION="8"
         PKG_MANAGER="dnf"
       else
@@ -1334,6 +1449,7 @@ main() {
       # shellcheck disable=SC2059
       printf "$(msg enter_choice "1/2")" ""
       read -r mode_input
+      mode_input="${mode_input:-1}"
       case "$mode_input" in
         1) run_mode="install"; break ;;
         2) run_mode="mirror"; break ;;
@@ -1449,6 +1565,14 @@ main() {
 
   # Detect install strategy
   detect_install_strategy
+
+  # Pre-install: remove conflicting packages and prepare kernel modules (RPM-based)
+  case "$INSTALL_TYPE" in
+    rpm|fedora)
+      remove_conflicting_packages "$PKG_MANAGER"
+      prepare_kernel_modules "$PKG_MANAGER" "${VERSION_ID%%.*}"
+      ;;
+  esac
 
   # Configure Docker source
   msg configuring_source
